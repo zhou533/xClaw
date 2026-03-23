@@ -1,0 +1,3 @@
+# AAN (All Agents Need) — spec repository
+# Ignored so Claude agents skip this directory and save context
+all-agents-need/
