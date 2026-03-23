@@ -43,3 +43,6 @@ deploy/.env
 
 # MCP config contains API keys — do not commit
 .cursor/mcp.json
+
+# Claude Code local settings — may contain API keys
+.claude/settings.local.json

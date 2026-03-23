@@ -1,0 +1,1 @@
+../../../all-agents-need/rules/rust/security.md
