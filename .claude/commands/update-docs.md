@@ -1,0 +1,1 @@
+../../all-agents-need/commands/update-docs.md

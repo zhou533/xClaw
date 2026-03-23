@@ -1,0 +1,1 @@
+../../../all-agents-need/rules/common/coding-style.md

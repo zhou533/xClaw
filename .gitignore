@@ -26,6 +26,7 @@ node_modules/
 dist/
 build/
 coverage/
+target/
 
 # Python caches
 __pycache__/
@@ -33,3 +34,15 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
+# Docker
+deploy/.env
+
+# Rust
+*.rs.bk
+
+
+# MCP config contains API keys — do not commit
+.cursor/mcp.json
+
+# Claude Code local settings — may contain API keys
+.claude/settings.local.json

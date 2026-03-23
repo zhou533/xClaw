@@ -1,0 +1,1 @@
+../../all-agents-need/agents/rust-build-resolver.md
