@@ -1,0 +1,65 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/post-edit-cargo-fmt.js"
+          }
+        ],
+        "description": "Auto-format .rs files with cargo fmt after edits"
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/post-edit-cargo-clippy.js",
+            "async": true,
+            "timeout": 60
+          }
+        ],
+        "description": "Run cargo clippy after editing .rs files (async, non-blocking)"
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/post-edit-cargo-check.js",
+            "async": true,
+            "timeout": 60
+          }
+        ],
+        "description": "Run cargo check after editing .rs files to verify compilation (async, non-blocking)"
+      }
+    ]
+  },
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp",
+        "--browser",
+        "chrome"
+      ]
+    },
+    "browser-use": {
+      "type": "http",
+      "url": "https://api.browser-use.com/mcp",
+      "headers": {
+        "x-browser-use-api-key": "YOUR_BROWSER_USE_KEY_HERE"
+      }
+    }
+  }
+}
