@@ -1,0 +1,1 @@
+//! Channel trait definitions.

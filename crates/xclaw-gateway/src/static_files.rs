@@ -1,0 +1,1 @@
+//! Frontend static asset serving.

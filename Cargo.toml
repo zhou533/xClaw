@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/xclaw-core",
+    "crates/xclaw-provider",
+    "crates/xclaw-gateway",
+    "crates/xclaw-channel",
+    "crates/xclaw-tools",
+    "crates/xclaw-config",
+    "apps/cli",
+    "apps/server",
+    # "apps/desktop/src-tauri",  # Tauri — uncomment after `tauri init`
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/user/xclaw"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.8" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Database
+rusqlite = { version = "0.33", features = ["bundled"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Internal crates
+xclaw-core = { path = "crates/xclaw-core" }
+xclaw-provider = { path = "crates/xclaw-provider" }
+xclaw-gateway = { path = "crates/xclaw-gateway" }
+xclaw-channel = { path = "crates/xclaw-channel" }
+xclaw-tools = { path = "crates/xclaw-tools" }
+xclaw-config = { path = "crates/xclaw-config" }
