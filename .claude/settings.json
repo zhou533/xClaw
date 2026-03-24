@@ -36,30 +36,5 @@
         "description": "Run cargo check after editing .rs files to verify compilation (async, non-blocking)"
       }
     ]
-  },
-  "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp@latest"
-      ]
-    },
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp",
-        "--browser",
-        "chrome"
-      ]
-    },
-    "browser-use": {
-      "type": "http",
-      "url": "https://api.browser-use.com/mcp",
-      "headers": {
-        "x-browser-use-api-key": "YOUR_BROWSER_USE_KEY_HERE"
-      }
-    }
   }
 }
