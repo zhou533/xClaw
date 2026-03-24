@@ -3,11 +3,13 @@ pub mod traits;
 pub mod types;
 
 pub mod claude;
+pub mod minimax;
 pub mod openai;
 pub mod router;
 
 pub use claude::ClaudeProvider;
 pub use error::ProviderError;
+pub use minimax::MiniMaxProvider;
 pub use openai::OpenAiProvider;
 pub use traits::{ChatStream, LlmProvider};
 pub use types::{
