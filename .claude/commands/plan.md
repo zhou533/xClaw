@@ -1,1 +1,0 @@
-../../all-agents-need/commands/plan.md

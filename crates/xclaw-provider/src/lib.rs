@@ -3,10 +3,10 @@ pub mod traits;
 pub mod types;
 
 pub mod claude;
-pub mod ollama;
 pub mod openai;
 pub mod router;
 
+pub use claude::ClaudeProvider;
 pub use error::ProviderError;
 pub use openai::OpenAiProvider;
 pub use traits::{ChatStream, LlmProvider};
