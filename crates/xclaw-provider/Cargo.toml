@@ -10,4 +10,10 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-xclaw-config = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+
+[dev-dependencies]
+mockito = { workspace = true }
+tokio = { workspace = true }

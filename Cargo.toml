@@ -44,6 +44,16 @@ rusqlite = { version = "0.33", features = ["bundled"] }
 # CLI
 clap = { version = "4", features = ["derive"] }
 
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Async streams
+futures = "0.3"
+tokio-stream = "0.1"
+
+# Test utilities
+mockito = "1"
+
 # Internal crates
 xclaw-core = { path = "crates/xclaw-core" }
 xclaw-provider = { path = "crates/xclaw-provider" }
