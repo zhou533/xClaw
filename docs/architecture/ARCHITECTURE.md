@@ -154,11 +154,16 @@ xclaw/
 │   │   └── Cargo.toml
 │   ├── xclaw-tools/              # 原子工具
 │   │   ├── src/
-│   │   │   ├── registry.rs       # 工具注册与分发
-│   │   │   ├── shell.rs          # Shell 命令执行
-│   │   │   ├── file_io.rs        # 文件读写
-│   │   │   ├── web_fetch.rs      # HTTP 请求
-│   │   │   └── browser.rs        # 浏览器控制
+│   │   │   ├── traits.rs         # Tool trait 定义
+│   │   │   ├── registry.rs       # ToolRegistry 注册与分发
+│   │   │   ├── shell.rs          # shell — Shell 命令执行
+│   │   │   ├── file.rs           # file_read / file_write / file_edit
+│   │   │   ├── git.rs            # git — Git 操作
+│   │   │   ├── http.rs           # http — HTTP 请求
+│   │   │   ├── browser.rs        # browser — Headless 浏览器 (CDP)
+│   │   │   ├── memory.rs         # memory_store / memory_recall
+│   │   │   ├── cron.rs           # cron — 定时任务调度
+│   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   └── xclaw-config/             # 配置管理
 │       ├── src/
@@ -212,28 +217,10 @@ xclaw/
 `xclaw-core` 是整个系统的类型基石，不包含业务逻辑，仅提供共享定义。几乎所有其他 crate 都依赖它。
 
 **职责**：
-- Trait definitions：`AgentLoop`、`MemoryStore`、`Skill` 等核心 trait
 - Shared types：`Message`、`Role`、`SessionId`、`ToolCall` 等共享类型
 - Error types：全局错误类型层次
 
-```rust
-// xclaw-core/src/traits.rs（伪代码）
-trait AgentLoop: Send + Sync {
-    async fn process(&self, input: UserInput, session: &SessionId) -> Result<AgentResponse>;
-}
-
-trait MemoryStore: Send + Sync {
-    async fn store(&self, session: &SessionId, entry: MemoryEntry) -> Result<()>;
-    async fn recall(&self, session: &SessionId, query: &str) -> Result<Vec<MemoryEntry>>;
-}
-
-trait Skill: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn parameters_schema(&self) -> serde_json::Value;
-    async fn execute(&self, params: serde_json::Value) -> Result<SkillOutput>;
-}
-```
+> **注意**：所有核心 Trait（`AgentLoop`、`LlmProvider`、`MemoryStore`、`Skill`、`Channel` 等）已分别迁移至各自的模块 crate 中定义，详见各模块章节。
 
 **依赖**：仅 `serde`、`serde_json`、`thiserror` — 零业务依赖
 
@@ -324,7 +311,73 @@ trait SkillRegistry: Send + Sync {
 
 **依赖**：仅 `xclaw-core`
 
-### 4.6 Gateway 控制平面
+### 4.6 xclaw-tools 原子工具层
+
+`xclaw-tools` 提供 Agent 可调用的原子工具能力。每个 Tool 是无状态、无上下文感知的单次操作，与 Skill（高级编排）形成互补。
+
+**Tool trait 定义**：
+
+```rust
+// xclaw-tools/src/traits.rs（伪代码）
+trait Tool: Send + Sync {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn parameters_schema(&self) -> serde_json::Value;
+    async fn execute(&self, ctx: &ToolContext, params: serde_json::Value) -> Result<ToolOutput>;
+}
+```
+
+**ToolContext**：
+
+每次工具执行时，Agent 构造一个 `ToolContext` 传入 `execute`，携带当前安全边界：
+
+```rust
+// xclaw-tools/src/traits.rs（伪代码）
+struct ToolContext {
+    scope: WorkspaceScope,          // 当前用户/工作区范围
+    fs_allowlist: Vec<PathBuf>,     // 文件系统允许列表（默认仅工作区）
+    net_allowlist: Vec<String>,     // 网络域名允许列表
+    timeout: Duration,              // 超时预算
+}
+```
+
+**ToolRegistry**：
+
+```rust
+// xclaw-tools/src/registry.rs（伪代码）
+pub struct ToolRegistry {
+    tools: HashMap<String, Box<dyn Tool>>,
+}
+
+impl ToolRegistry {
+    pub fn register(&mut self, tool: impl Tool + 'static);
+    pub fn get(&self, name: &str) -> Option<&dyn Tool>;
+    pub fn list_schemas(&self) -> Vec<ToolSchema>;
+}
+```
+
+内置工具在启动时注册；WASM Skill 也可在运行时动态注册额外工具。
+
+**内置工具集**：
+
+| Tool | Module | Description |
+|------|--------|-------------|
+| `shell` | `tools::shell` | Execute shell commands (with timeout + output capture) |
+| `file_read` | `tools::file` | Read file contents |
+| `file_write` | `tools::file` | Write/create files |
+| `file_edit` | `tools::file` | Patch files with search-replace |
+| `git` | `tools::git` | Git operations (status, diff, commit, log) |
+| `http` | `tools::http` | HTTP requests (GET/POST/PUT/DELETE) |
+| `browser` | `tools::browser` | Headless browser control via CDP |
+| `memory_store` | `tools::memory` | Store a memory entry |
+| `memory_recall` | `tools::memory` | Search memory |
+| `cron` | `tools::cron` | Schedule recurring tasks |
+
+**Security**：所有工具在 `ToolContext` 约束下执行，由 Agent 按会话配置构造。文件系统默认仅允许工作区路径，网络请求受域名白名单限制，每次调用受超时预算控制。详见第 8.2 节工具沙箱策略。
+
+**依赖**：`xclaw-core`
+
+### 4.7 Gateway 控制平面
 
 基于 axum 构建的 HTTP/WS 服务器，是 Server/Desktop 模式下外部交互的统一入口。
 
@@ -347,7 +400,7 @@ trait SkillRegistry: Send + Sync {
 
 **依赖**：`xclaw-core`、`xclaw-agent`
 
-### 4.7 Channel 通道层
+### 4.8 Channel 通道层
 
 ```rust
 trait Channel: Send + Sync {
@@ -362,7 +415,7 @@ trait Channel: Send + Sync {
 
 **依赖**：`xclaw-core`
 
-### 4.8 Config Manager
+### 4.9 Config Manager
 
 ```
 配置加载优先级（高 → 低）：
