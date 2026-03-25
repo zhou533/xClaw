@@ -27,52 +27,68 @@ xClaw 是一个类 OpenClaw 的个人 AI 助手平台，采用 Rust 核心 + Sve
 
 ## 2. 高层架构
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                     运行模式层 (Runtime)                       │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐      │
-│  │  Tauri 桌面   │   │  CLI 命令行   │   │  Server 模式  │      │
-│  │  (macOS/Win) │   │              │   │  (云端部署)   │      │
-│  └──────┬───────┘   └───┬──────────┘   └──────┬───────┘      │
-│         │               │                     │              │
-│  ┌──────┴───────────┐   │  ┌──────────────────┴───────────┐  │
-│  │ Gateway (axum)   │   │  │ Gateway (axum)               │  │
-│  │ HTTP/WS+静态文件  │   │  │ HTTP/WS+静态文件              │  │
-│  └──────┬───────────┘   │  └──────────────┬───────────────┘  │
-│         │               │                 │                  │
-│  ┌──────┴───────────────┴─────────────────┴───────────────┐  │
-│  │              xclaw-agent 智能体引擎                       │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌────────────┐              │  │
-│  │  │ Agent    │ │ Session  │ │ Tool       │              │  │
-│  │  │ Loop     │ │ Manager  │ │ Dispatch   │              │  │
-│  │  └──────────┘ └──────────┘ └────────────┘              │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                              │                               │
-│  ┌───────────────────────────┴────────────────────────────┐  │
-│  │              功能模块层（均依赖 xclaw-core）               │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │  │
-│  │  │ Provider │ │ Memory   │ │ Tools    │ │ Skill    │  │  │
-│  │  │ LLM后端  │ │ 记忆持久化│ │ 原子工具  │ │ 高级技能  │  │  │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │  │
-│  │  ┌──────────┐ ┌──────────┐                            │  │
-│  │  │ Channel  │ │ Config   │                            │  │
-│  │  │ 消息通道  │ │ 配置管理  │                            │  │
-│  │  └──────────┘ └──────────┘                            │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                              │                               │
-│  ┌───────────────────────────┴────────────────────────────┐  │
-│  │           xclaw-core 基础定义层                          │  │
-│  │   Trait definitions · Shared types · Error types        │  │
-│  └────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+  %% ── User Surfaces ──
+  subgraph Surfaces["User Surfaces"]
+    desktop["Desktop App<br/>(Tauri v2 + React)"]
+    webapp["Web App<br/>(React SPA)"]
+    cli["CLI<br/>(Rust binary)"]
+    channels["Channels<br/>(Telegram, Discord, Slack...)"]
+  end
 
-┌──────────────────────────────────────────────────────────────┐
-│                  前端层 (Svelte 5 + Vite)                      │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐       │
-│  │ 对话界面  │ │ 记忆浏览  │ │ 配置管理  │ │ 系统监控   │       │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────┘       │
-│  Tauri 模式：内嵌于桌面窗口 / Server 模式：由 Gateway 提供     │
-└──────────────────────────────────────────────────────────────┘
+  %% ── Rust Core ──
+  subgraph Workspace["Rust Core — Cargo Workspace"]
+
+    gateway["xclaw-gateway<br/>(Axum HTTP/WS)"]
+    channel["xclaw-channel<br/>(Channel Adapters)"]
+
+    agent["xclaw-agent<br/>(Agent Runtime)"]
+
+    provider["xclaw-provider<br/>(LLM Adapters)"]
+    memory["xclaw-memory<br/>(Storage + Vector)"]
+    tool["xclaw-tool<br/>(Tool Registry)"]
+    skill["xclaw-skill<br/>(WASM Sandbox)"]
+
+    core["xclaw-core<br/>(Traits + Types)"]
+  end
+
+  %% ── User Surfaces → 入口 ──
+  desktop -- "Tauri IPC" --> gateway
+  webapp -- "HTTP / WS" --> gateway
+  cli -- "Direct embed" --> agent
+  channels --> channel
+
+  %% ── 入口 → Agent ──
+  gateway --> agent
+  channel --> agent
+
+  %% ── Agent → 功能模块 ──
+  agent --> provider
+  agent --> memory
+  agent --> tool
+  agent --> skill
+
+  %% ── 所有 crate → core ──
+  gateway --> core
+  channel --> core
+  agent --> core
+  provider --> core
+  memory --> core
+  tool --> core
+  skill --> core
+
+  %% ── 样式 ──
+  style Surfaces fill:#f0f4ff,stroke:#4a6fa5,color:#333
+  style Workspace fill:#2a2a2a,stroke:#555,color:#eee
+  style gateway fill:#37474f,stroke:#90a4ae,color:#fff
+  style channel fill:#37474f,stroke:#90a4ae,color:#fff
+  style agent fill:#1b5e20,stroke:#66bb6a,color:#fff
+  style provider fill:#37474f,stroke:#90a4ae,color:#fff
+  style memory fill:#37474f,stroke:#90a4ae,color:#fff
+  style tool fill:#37474f,stroke:#90a4ae,color:#fff
+  style skill fill:#37474f,stroke:#90a4ae,color:#fff
+  style core fill:#37474f,stroke:#90a4ae,color:#fff
 ```
 
 ---
@@ -225,10 +241,19 @@ trait Skill: Send + Sync {
 
 `xclaw-agent` 是系统的核心驱动，负责接收用户消息、构建提示词、调用 LLM、分发 Tool/Skill 调用、管理会话。
 
-```
-消息输入 → Session 上下文加载 → Memory 注入 → Prompt 构建
-    → LLM 调用 → 响应解析 → [Tool/Skill 调用 → 结果回注 → 再次 LLM] 循环
-    → 最终响应 → 通道回复 → Memory 持久化
+```mermaid
+flowchart LR
+  A[消息输入] --> B[Session\n上下文加载]
+  B --> C[Memory 注入]
+  C --> D[Prompt 构建]
+  D --> E[LLM 调用]
+  E --> F{需要工具调用?}
+  F -- 是 --> G[Tool/Skill\nDispatch]
+  G --> H[结果回注]
+  H --> E
+  F -- 否 --> I[最终响应]
+  I --> J[通道回复]
+  J --> K[Memory 持久化]
 ```
 
 **关键设计**：
@@ -358,13 +383,13 @@ trait Channel: Send + Sync {
 
 ### 5.1 桌面模式（Tauri v2）
 
-```
-用户启动 xClaw.app / xClaw.exe
-  → Tauri 初始化
-  → 启动嵌入式 Gateway（绑定 127.0.0.1:随机端口）
-  → 加载 Svelte 前端（Tauri webview）
-  → 系统托盘常驻
-  → Channel 连接（按配置自动启动）
+```mermaid
+flowchart TD
+  A[用户启动 xClaw.app / xClaw.exe] --> B[Tauri 初始化]
+  B --> C[启动嵌入式 Gateway\n绑定 127.0.0.1:随机端口]
+  B --> D[加载 Svelte 前端\nTauri webview]
+  B --> E[系统托盘常驻]
+  C --> F[Channel 连接\n按配置自动启动]
 ```
 
 **Tauri IPC 命令**（Rust ↔ 前端通信）：
@@ -385,12 +410,12 @@ CLI 入口使用 `clap` 解析命令，直接依赖 `xclaw-agent`，无需经过
 
 ### 5.3 Server 模式（云端部署）
 
-```
-xclaw serve --bind 0.0.0.0:8080
-  → 启动 Gateway（HTTP/WS）
-  → 提供 Web UI（Svelte 构建产物）
-  → Channel 连接
-  → 无窗口、无 Tauri 依赖
+```mermaid
+flowchart TD
+  A["xclaw serve --bind 0.0.0.0:8080"] --> B[启动 Gateway\nHTTP/WS]
+  B --> C[提供 Web UI\nSvelte 构建产物]
+  B --> D[Channel 连接]
+  B --> E[无窗口 · 无 Tauri 依赖]
 ```
 
 部署选项：
@@ -404,41 +429,39 @@ xclaw serve --bind 0.0.0.0:8080
 
 ### 6.1 对话消息流
 
-```
-[用户] → Channel/WebChat ──→ Gateway ──┐
-         CLI ──────────────────────────┤
-                                       ▼
-                              ┌──────────────┐
-                              │ xclaw-agent  │ ← 加载 Session 上下文
-                              │ Agent Loop   │ ← Memory 注入 + Prompt 构建
-                              └──────┬───────┘
-                                     ▼
-                              ┌──────────────┐
-                              │ xclaw-provider│ ← LLM API 调用（流式）
-                              └──────┬───────┘
-                                     ▼
-                              ┌──────────────┐
-                              │ Tool / Skill │ ← 如果 LLM 请求调用
-                              │ Dispatch     │ ← 执行 → 结果回注 Agent Loop
-                              └──────┬───────┘
-                                     ▼
-                              ┌──────────────┐
-                              │ Response     │ ← 流式推送到前端/通道/CLI
-                              └──────┬───────┘
-                                     ▼
-                              ┌──────────────┐
-                              │ xclaw-memory │ ← 持久化对话记录
-                              └──────────────┘
+```mermaid
+flowchart TD
+  User([用户])
+  User --> CH[Channel / WebChat]
+  User --> CLI[CLI]
+  CH --> GW[xclaw-gateway]
+  GW --> Agent
+  CLI --> Agent
+
+  subgraph Agent[xclaw-agent]
+    direction TB
+    AL[Agent Loop\n加载 Session 上下文\nMemory 注入 + Prompt 构建]
+  end
+
+  Agent --> Provider[xclaw-provider\nLLM API 调用 · 流式]
+  Provider --> Dispatch{需要调用?}
+  Dispatch -- 是 --> TS[Tool / Skill Dispatch\n执行 → 结果回注]
+  TS --> Agent
+  Dispatch -- 否 --> Resp[Response\n流式推送到前端/通道/CLI]
+  Resp --> Memory[xclaw-memory\n持久化对话记录]
 ```
 
 ### 6.2 配置热更新流
 
-```
-Web UI / config.toml 修改
-  → Config Manager 检测变更
-  → 广播 ConfigChanged 事件
-  → 各组件响应更新（Channel 重连、Provider 切换等）
-  → 无需重启进程
+```mermaid
+flowchart LR
+  A[Web UI / config.toml 修改] --> B[Config Manager\n检测变更]
+  B --> C[广播 ConfigChanged 事件]
+  C --> D[Channel 重连]
+  C --> E[Provider 切换]
+  C --> F[其他组件更新]
+
+  style C fill:#fff8e1,stroke:#f9a825
 ```
 
 ---
