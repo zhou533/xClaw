@@ -21,6 +21,9 @@ pub enum XClawError {
     #[error("session error: {0}")]
     Session(String),
 
+    #[error("tool error: {0}")]
+    Tool(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -59,6 +62,12 @@ mod tests {
     fn session_error_display() {
         let e = XClawError::Session("expired".to_string());
         assert_eq!(e.to_string(), "session error: expired");
+    }
+
+    #[test]
+    fn tool_error_display() {
+        let e = XClawError::Tool("file_read failed".to_string());
+        assert_eq!(e.to_string(), "tool error: file_read failed");
     }
 
     #[test]
