@@ -1,10 +1,9 @@
 [package]
-name = "xclaw-gateway"
+name = "xclaw-agent"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -12,4 +11,9 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 xclaw-core = { workspace = true }
-xclaw-agent = { workspace = true }
+xclaw-provider = { workspace = true }
+xclaw-memory = { workspace = true }
+xclaw-tools = { workspace = true }
+xclaw-skill = { workspace = true }
+xclaw-channel = { workspace = true }
+xclaw-config = { workspace = true }

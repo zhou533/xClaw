@@ -13,6 +13,5 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-xclaw-core = { workspace = true }
+xclaw-agent = { workspace = true }
 xclaw-config = { workspace = true }
-xclaw-gateway = { workspace = true }

@@ -2,6 +2,9 @@
 resolver = "2"
 members = [
     "crates/xclaw-core",
+    "crates/xclaw-agent",
+    "crates/xclaw-memory",
+    "crates/xclaw-skill",
     "crates/xclaw-provider",
     "crates/xclaw-gateway",
     "crates/xclaw-channel",
@@ -56,6 +59,9 @@ mockito = "1"
 
 # Internal crates
 xclaw-core = { path = "crates/xclaw-core" }
+xclaw-agent = { path = "crates/xclaw-agent" }
+xclaw-memory = { path = "crates/xclaw-memory" }
+xclaw-skill = { path = "crates/xclaw-skill" }
 xclaw-provider = { path = "crates/xclaw-provider" }
 xclaw-gateway = { path = "crates/xclaw-gateway" }
 xclaw-channel = { path = "crates/xclaw-channel" }

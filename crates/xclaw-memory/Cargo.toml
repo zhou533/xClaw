@@ -1,15 +1,18 @@
 [package]
-name = "xclaw-gateway"
+name = "xclaw-memory"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+rusqlite = { workspace = true }
 xclaw-core = { workspace = true }
-xclaw-agent = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_json = { workspace = true }
