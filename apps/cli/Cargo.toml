@@ -15,3 +15,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 xclaw-agent = { workspace = true }
 xclaw-config = { workspace = true }
+xclaw-core = { workspace = true }
+xclaw-provider = { workspace = true }

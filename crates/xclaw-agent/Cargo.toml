@@ -17,3 +17,6 @@ xclaw-tools = { workspace = true }
 xclaw-skill = { workspace = true }
 xclaw-channel = { workspace = true }
 xclaw-config = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }

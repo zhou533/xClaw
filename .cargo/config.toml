@@ -1,0 +1,5 @@
+# Enforce single-threaded test execution.
+# Required because xclaw-config loader tests use unsafe env::set_var/remove_var
+# which is only sound when no other threads read env vars concurrently.
+[test]
+test-threads = 1
