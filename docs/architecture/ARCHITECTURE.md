@@ -28,44 +28,51 @@ xClaw 是一个类 OpenClaw 的个人 AI 助手平台，采用 Rust 核心 + Sve
 ## 2. 高层架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    运行模式层 (Runtime)                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │  Tauri 桌面   │  │  CLI 命令行   │  │  Server 模式  │   │
-│  │  (macOS/Win) │  │              │  │  (云端部署)   │   │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │
-│         │                 │                 │           │
-│  ┌──────┴─────────────────┴─────────────────┴───────┐   │
-│  │              Gateway 控制平面 (axum)               │   │
-│  │         HTTP REST + WebSocket + 静态文件            │   │
-│  └──────────────────────┬───────────────────────────┘   │
-│                         │                               │
-│  ┌──────────────────────┴───────────────────────────┐   │
-│  │               xclaw-core 核心层                    │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌────────┐ ┌─────────┐ │   │
-│  │  │ Agent   │ │ Session │ │ Memory │ │ Config  │ │   │
-│  │  │ Loop    │ │ Manager │ │ Store  │ │ Manager │ │   │
-│  │  └────┬────┘ └─────────┘ └────────┘ └─────────┘ │   │
-│  │       │                                          │   │
-│  │  ┌────┴────────────────────────────────────────┐ │   │
-│  │  │           Tool Dispatch Engine              │ │   │
-│  │  └─────────────────────────────────────────────┘ │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                         │
-│  ┌─────────────────────┐  ┌──────────────────────────┐  │
-│  │  Provider 抽象层     │  │  Channel 通道层           │  │
-│  │  (Claude, OpenAI,   │  │  (Telegram, Slack,       │  │
-│  │   Ollama, ...)      │  │   Discord, WebChat, ...) │  │
-│  └─────────────────────┘  └──────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     运行模式层 (Runtime)                       │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐      │
+│  │  Tauri 桌面   │   │  CLI 命令行   │   │  Server 模式  │      │
+│  │  (macOS/Win) │   │              │   │  (云端部署)   │      │
+│  └──────┬───────┘   └───┬──────────┘   └──────┬───────┘      │
+│         │               │                     │              │
+│  ┌──────┴───────────┐   │  ┌──────────────────┴───────────┐  │
+│  │ Gateway (axum)   │   │  │ Gateway (axum)               │  │
+│  │ HTTP/WS+静态文件  │   │  │ HTTP/WS+静态文件              │  │
+│  └──────┬───────────┘   │  └──────────────┬───────────────┘  │
+│         │               │                 │                  │
+│  ┌──────┴───────────────┴─────────────────┴───────────────┐  │
+│  │              xclaw-agent 智能体引擎                       │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌────────────┐              │  │
+│  │  │ Agent    │ │ Session  │ │ Tool       │              │  │
+│  │  │ Loop     │ │ Manager  │ │ Dispatch   │              │  │
+│  │  └──────────┘ └──────────┘ └────────────┘              │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                              │                               │
+│  ┌───────────────────────────┴────────────────────────────┐  │
+│  │              功能模块层（均依赖 xclaw-core）               │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │  │
+│  │  │ Provider │ │ Memory   │ │ Tools    │ │ Skill    │  │  │
+│  │  │ LLM后端  │ │ 记忆持久化│ │ 原子工具  │ │ 高级技能  │  │  │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │  │
+│  │  ┌──────────┐ ┌──────────┐                            │  │
+│  │  │ Channel  │ │ Config   │                            │  │
+│  │  │ 消息通道  │ │ 配置管理  │                            │  │
+│  │  └──────────┘ └──────────┘                            │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                              │                               │
+│  ┌───────────────────────────┴────────────────────────────┐  │
+│  │           xclaw-core 基础定义层                          │  │
+│  │   Trait definitions · Shared types · Error types        │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────┐
-│                  前端层 (Svelte 5 + Vite)                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │
-│  │ 对话界面  │ │ 记忆浏览  │ │ 配置管理  │ │ 系统监控   │  │
-│  └──────────┘ └──────────┘ └──────────┘ └───────────┘  │
-│  Tauri 模式：内嵌于桌面窗口 / Server 模式：由 Gateway 提供  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                  前端层 (Svelte 5 + Vite)                      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐       │
+│  │ 对话界面  │ │ 记忆浏览  │ │ 配置管理  │ │ 系统监控   │       │
+│  └──────────┘ └──────────┘ └──────────┘ └───────────┘       │
+│  Tauri 模式：内嵌于桌面窗口 / Server 模式：由 Gateway 提供     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -76,11 +83,34 @@ xClaw 是一个类 OpenClaw 的个人 AI 助手平台，采用 Rust 核心 + Sve
 xclaw/
 ├── Cargo.toml                    # Workspace 根配置
 ├── crates/
-│   ├── xclaw-core/               # 核心运行时
+│   ├── xclaw-core/               # 基础定义层（Trait、共享类型、错误类型）
 │   │   ├── src/
-│   │   │   ├── agent/            # Agent 循环、Prompt 构建
-│   │   │   ├── session/          # 会话管理与隔离
-│   │   │   ├── memory/           # 对话记忆与持久化
+│   │   │   ├── types.rs          # 共享类型（Message, Role, SessionId, ToolCall 等）
+│   │   │   ├── error.rs          # 全局错误类型
+│   │   │   ├── traits.rs         # 核心 Trait（AgentLoop, MemoryStore, Skill 等）
+│   │   │   └── lib.rs
+│   │   └── Cargo.toml
+│   ├── xclaw-agent/              # 智能体引擎
+│   │   ├── src/
+│   │   │   ├── loop.rs           # Agent 循环主逻辑
+│   │   │   ├── prompt.rs         # Prompt 构建
+│   │   │   ├── session.rs        # 会话管理与隔离
+│   │   │   ├── dispatch.rs       # Tool/Skill 调用分发协调
+│   │   │   └── lib.rs
+│   │   └── Cargo.toml
+│   ├── xclaw-memory/             # 对话记忆与持久化
+│   │   ├── src/
+│   │   │   ├── store.rs          # MemoryStore 实现
+│   │   │   ├── sqlite.rs         # SQLite 温数据层
+│   │   │   ├── search.rs         # 向量搜索/FTS5 语义检索
+│   │   │   └── lib.rs
+│   │   └── Cargo.toml
+│   ├── xclaw-skill/              # 技能系统
+│   │   ├── src/
+│   │   │   ├── traits.rs         # Skill trait 定义
+│   │   │   ├── registry.rs       # 技能注册与发现
+│   │   │   ├── loader.rs         # 技能加载（文件系统/内置）
+│   │   │   ├── executor.rs       # 技能执行引擎
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   ├── xclaw-provider/           # LLM 提供商抽象
@@ -106,7 +136,7 @@ xclaw/
 │   │   │   ├── discord.rs
 │   │   │   └── webchat.rs        # 内置 WebChat 通道
 │   │   └── Cargo.toml
-│   ├── xclaw-tools/              # 工具生态
+│   ├── xclaw-tools/              # 原子工具
 │   │   ├── src/
 │   │   │   ├── registry.rs       # 工具注册与分发
 │   │   │   ├── shell.rs          # Shell 命令执行
@@ -122,7 +152,7 @@ xclaw/
 │       │   └── lib.rs
 │       └── Cargo.toml
 ├── apps/
-│   ├── cli/                      # CLI 入口
+│   ├── cli/                      # CLI 入口（直接依赖 xclaw-agent）
 │   │   ├── src/main.rs           # clap 命令解析
 │   │   └── Cargo.toml
 │   ├── desktop/                  # Tauri v2 桌面应用
@@ -161,23 +191,56 @@ xclaw/
 
 ## 4. 核心组件设计
 
-### 4.1 Agent Loop（智能体循环）
+### 4.1 xclaw-core 基础定义层
 
-Agent Loop 是系统的核心引擎，负责接收用户消息、构建提示词、调用 LLM、分发工具调用。
+`xclaw-core` 是整个系统的类型基石，不包含业务逻辑，仅提供共享定义。几乎所有其他 crate 都依赖它。
+
+**职责**：
+- Trait definitions：`AgentLoop`、`MemoryStore`、`Skill` 等核心 trait
+- Shared types：`Message`、`Role`、`SessionId`、`ToolCall` 等共享类型
+- Error types：全局错误类型层次
+
+```rust
+// xclaw-core/src/traits.rs（伪代码）
+trait AgentLoop: Send + Sync {
+    async fn process(&self, input: UserInput, session: &SessionId) -> Result<AgentResponse>;
+}
+
+trait MemoryStore: Send + Sync {
+    async fn store(&self, session: &SessionId, entry: MemoryEntry) -> Result<()>;
+    async fn recall(&self, session: &SessionId, query: &str) -> Result<Vec<MemoryEntry>>;
+}
+
+trait Skill: Send + Sync {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn parameters_schema(&self) -> serde_json::Value;
+    async fn execute(&self, params: serde_json::Value) -> Result<SkillOutput>;
+}
+```
+
+**依赖**：仅 `serde`、`serde_json`、`thiserror` — 零业务依赖
+
+### 4.2 xclaw-agent 智能体引擎
+
+`xclaw-agent` 是系统的核心驱动，负责接收用户消息、构建提示词、调用 LLM、分发 Tool/Skill 调用、管理会话。
 
 ```
 消息输入 → Session 上下文加载 → Memory 注入 → Prompt 构建
-    → LLM 调用 → 响应解析 → [工具调用 → 结果回注 → 再次 LLM] 循环
+    → LLM 调用 → 响应解析 → [Tool/Skill 调用 → 结果回注 → 再次 LLM] 循环
     → 最终响应 → 通道回复 → Memory 持久化
 ```
 
 **关键设计**：
 - 使用 Tokio 异步运行时驱动整个循环
-- Tool 调用采用结构化 JSON Schema 描述，与 LLM 的 function calling 对接
+- Tool/Skill 调用采用结构化 JSON Schema 描述，与 LLM 的 function calling 对接
 - 支持流式响应（SSE/WebSocket），提升用户体验
 - 循环上限保护：单次对话最多 N 轮工具调用，防止失控
+- Session Manager 内置于此模块，负责会话创建、上下文隔离与生命周期管理
 
-### 4.2 Provider 抽象层
+**依赖**：`xclaw-core`、`xclaw-provider`、`xclaw-memory`、`xclaw-tools`、`xclaw-skill`、`xclaw-channel`、`xclaw-config`
+
+### 4.3 Provider 抽象层
 
 ```rust
 // 核心 trait 定义（伪代码）
@@ -193,9 +256,52 @@ trait LlmProvider: Send + Sync {
 - 自动 Failover：主模型失败后切换到备用
 - 按任务类型路由（对话用 Sonnet，复杂推理用 Opus）
 
-### 4.3 Gateway 控制平面
+**依赖**：`xclaw-core`
 
-基于 axum 构建的 HTTP/WS 服务器，是所有外部交互的统一入口。
+### 4.4 xclaw-memory 记忆与持久化
+
+独立的记忆系统模块，实现 `xclaw-core` 中定义的 `MemoryStore` trait。
+
+采用分层存储策略：
+
+| 层级 | 存储 | 用途 |
+|------|------|------|
+| 热数据 | 内存（`DashMap`） | 当前活跃会话上下文 |
+| 温数据 | SQLite | 近期对话历史、配置 |
+| 冷数据 | 文件系统（JSON） | 长期记忆、导出备份 |
+
+**向量搜索**：可选集成 `qdrant`（嵌入式模式）或 SQLite FTS5 进行语义检索。
+
+**依赖**：`xclaw-core`
+
+### 4.5 xclaw-skill 技能系统
+
+Skill 是高级编排能力，组合 Prompt 模板与执行逻辑，形成可复用的 Agent 行为模式。
+
+**Skill 与 Tool 的区别**：
+- **Tool**：原子操作（shell 执行、文件读写、HTTP 请求），无上下文感知
+- **Skill**：高级编排，封装特定领域的 Prompt + 参数 Schema + 执行策略，可被 Agent 在对话循环中调度
+
+```rust
+// xclaw-skill/src/traits.rs（伪代码）
+trait SkillRegistry: Send + Sync {
+    fn register(&mut self, skill: Box<dyn Skill>) -> Result<()>;
+    fn get(&self, name: &str) -> Option<&dyn Skill>;
+    fn list(&self) -> Vec<SkillInfo>;
+}
+```
+
+**模块结构**：
+- `traits.rs` — Skill trait 定义（核心 Skill trait 在 `xclaw-core` 中，此处扩展 SkillRegistry 等）
+- `registry.rs` — 技能注册与发现
+- `loader.rs` — 技能加载（文件系统/内置）
+- `executor.rs` — 技能执行引擎
+
+**依赖**：仅 `xclaw-core`
+
+### 4.6 Gateway 控制平面
+
+基于 axum 构建的 HTTP/WS 服务器，是 Server/Desktop 模式下外部交互的统一入口。
 
 **REST API**：
 | 端点 | 方法 | 说明 |
@@ -207,13 +313,16 @@ trait LlmProvider: Send + Sync {
 | `/api/config` | GET/PUT | 配置读写 |
 | `/api/channels` | GET/PUT | 通道状态 |
 | `/api/tools` | GET | 工具列表 |
+| `/api/skills` | GET | 技能列表 |
 | `/api/health` | GET | 健康检查 |
 
 **WebSocket**：
 - `/ws/chat` — 实时对话（双向流式）
 - `/ws/events` — 系统事件推送（状态变化、通道消息）
 
-### 4.4 Channel 通道层
+**依赖**：`xclaw-core`、`xclaw-agent`
+
+### 4.7 Channel 通道层
 
 ```rust
 trait Channel: Send + Sync {
@@ -226,19 +335,9 @@ trait Channel: Send + Sync {
 
 每个 Channel 实现独立运行在自己的 Tokio task 中，通过 `mpsc` channel 与 Agent Loop 通信。
 
-### 4.5 Memory Store
+**依赖**：`xclaw-core`
 
-采用分层存储策略：
-
-| 层级 | 存储 | 用途 |
-|------|------|------|
-| 热数据 | 内存（`DashMap`） | 当前活跃会话上下文 |
-| 温数据 | SQLite | 近期对话历史、配置 |
-| 冷数据 | 文件系统（JSON） | 长期记忆、导出备份 |
-
-**向量搜索**：可选集成 `qdrant`（嵌入式模式）或 SQLite FTS5 进行语义检索。
-
-### 4.6 Config Manager
+### 4.8 Config Manager
 
 ```
 配置加载优先级（高 → 低）：
@@ -270,7 +369,7 @@ trait Channel: Send + Sync {
 
 **Tauri IPC 命令**（Rust ↔ 前端通信）：
 - 文件对话框、系统通知、剪贴板、窗口控制
-- 直接调用 xclaw-core 函数，跳过 HTTP（性能优化）
+- 直接调用 xclaw-agent 函数，跳过 HTTP（性能优化）
 
 ### 5.2 CLI 模式
 
@@ -282,7 +381,7 @@ xclaw config set provider.default claude
 xclaw channel list
 ```
 
-CLI 入口使用 `clap` 解析命令，直接调用 xclaw-core。
+CLI 入口使用 `clap` 解析命令，直接依赖 `xclaw-agent`，无需经过 Gateway。
 
 ### 5.3 Server 模式（云端部署）
 
@@ -306,34 +405,30 @@ xclaw serve --bind 0.0.0.0:8080
 ### 6.1 对话消息流
 
 ```
-[用户] → Channel/WebChat/CLI
-         │
-         ▼
-    ┌─────────┐
-    │ Gateway  │ ← 路由到对应 Session
-    └────┬────┘
-         ▼
-    ┌─────────┐
-    │ Agent   │ ← 加载 Session 上下文 + Memory
-    │ Loop    │ ← 构建 Prompt
-    └────┬────┘
-         ▼
-    ┌─────────┐
-    │ Provider│ ← LLM API 调用（流式）
-    └────┬────┘
-         ▼
-    ┌─────────┐
-    │ Tool    │ ← 如果 LLM 请求工具调用
-    │ Dispatch│ ← 执行工具 → 结果回注 Agent Loop
-    └────┬────┘
-         ▼
-    ┌─────────┐
-    │ Response│ ← 流式推送到前端/通道
-    └────┬────┘
-         ▼
-    ┌─────────┐
-    │ Memory  │ ← 持久化对话记录
-    └─────────┘
+[用户] → Channel/WebChat ──→ Gateway ──┐
+         CLI ──────────────────────────┤
+                                       ▼
+                              ┌──────────────┐
+                              │ xclaw-agent  │ ← 加载 Session 上下文
+                              │ Agent Loop   │ ← Memory 注入 + Prompt 构建
+                              └──────┬───────┘
+                                     ▼
+                              ┌──────────────┐
+                              │ xclaw-provider│ ← LLM API 调用（流式）
+                              └──────┬───────┘
+                                     ▼
+                              ┌──────────────┐
+                              │ Tool / Skill │ ← 如果 LLM 请求调用
+                              │ Dispatch     │ ← 执行 → 结果回注 Agent Loop
+                              └──────┬───────┘
+                                     ▼
+                              ┌──────────────┐
+                              │ Response     │ ← 流式推送到前端/通道/CLI
+                              └──────┬───────┘
+                                     ▼
+                              ┌──────────────┐
+                              │ xclaw-memory │ ← 持久化对话记录
+                              └──────────────┘
 ```
 
 ### 6.2 配置热更新流
@@ -436,7 +531,8 @@ CMD ["xclaw-server", "--bind", "0.0.0.0:8080"]
 **插件扩展点**：
 - `Provider` trait：新增 LLM 后端
 - `Channel` trait：新增消息通道
-- `Tool` trait：新增工具能力
+- `Tool` trait：新增原子工具能力
+- `Skill` trait：新增高级技能编排
 - 前端组件：Svelte 组件化架构天然支持扩展
 
 ---
