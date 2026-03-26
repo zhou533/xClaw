@@ -23,6 +23,14 @@ xClaw 是一个类 OpenClaw 的个人 AI 助手平台，采用 Rust 核心 + Sve
 - **并发处理**：支持同时处理多通道消息
 - **安全性**：本地密钥加密存储，通道消息端到端不落盘
 
+### 1.3 架构原则
+
+| 原则 | 描述 |
+|------|------|
+| Trait 定义归属模块 | 每个 Trait 在其所属的业务模块 crate 中定义（如 `MemoryStore` 在 `xclaw-memory`，`Tool` 在 `xclaw-tools`），`xclaw-core` 仅存放跨模块共享的基础类型和错误类型 |
+| AIOS 兼容 | Role 定义对齐 [AIOS](https://github.com/agiresearch/AIOS) Agent 配置规范（name, description, tools, meta），保持与 AIOS 生态的互操作性 |
+| 文件优先 | 用户可见的持久化数据（记忆、Role 配置）优先使用人类可读的文件格式（Markdown, YAML），数据库仅用于性能敏感的结构化查询 |
+
 ---
 
 ## 2. 高层架构
@@ -46,11 +54,12 @@ graph TB
     agent["xclaw-agent<br/>(Agent Runtime)"]
 
     provider["xclaw-provider<br/>(LLM Adapters)"]
+    role["xclaw-role<br/>(Role + Orchestration)"]
     memory["xclaw-memory<br/>(Storage + Vector)"]
     tool["xclaw-tool<br/>(Tool Registry)"]
     skill["xclaw-skill<br/>(WASM Sandbox)"]
 
-    core["xclaw-core<br/>(Traits + Types)"]
+    core["xclaw-core<br/>(Shared Types)"]
   end
 
   %% ── User Surfaces → 入口 ──
@@ -65,6 +74,7 @@ graph TB
 
   %% ── Agent → 功能模块 ──
   agent --> provider
+  agent --> role
   agent --> memory
   agent --> tool
   agent --> skill
@@ -74,6 +84,7 @@ graph TB
   channel --> core
   agent --> core
   provider --> core
+  role --> core
   memory --> core
   tool --> core
   skill --> core
@@ -86,6 +97,7 @@ graph TB
   style agent fill:#1b5e20,stroke:#66bb6a,color:#fff
   style provider fill:#37474f,stroke:#90a4ae,color:#fff
   style memory fill:#37474f,stroke:#90a4ae,color:#fff
+  style role fill:#37474f,stroke:#90a4ae,color:#fff
   style tool fill:#37474f,stroke:#90a4ae,color:#fff
   style skill fill:#37474f,stroke:#90a4ae,color:#fff
   style core fill:#37474f,stroke:#90a4ae,color:#fff
@@ -99,11 +111,10 @@ graph TB
 xclaw/
 ├── Cargo.toml                    # Workspace 根配置
 ├── crates/
-│   ├── xclaw-core/               # 基础定义层（Trait、共享类型、错误类型）
+│   ├── xclaw-core/               # 基础定义层（共享类型、错误类型）
 │   │   ├── src/
-│   │   │   ├── types.rs          # 共享类型（Message, Role, SessionId, ToolCall 等）
+│   │   │   ├── types.rs          # 共享类型（Message, SessionId, RoleId, ToolCall 等）
 │   │   │   ├── error.rs          # 全局错误类型
-│   │   │   ├── traits.rs         # 核心 Trait（AgentLoop, MemoryStore, Skill 等）
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   ├── xclaw-agent/              # 智能体引擎
@@ -114,11 +125,21 @@ xclaw/
 │   │   │   ├── dispatch.rs       # Tool/Skill 调用分发协调
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
-│   ├── xclaw-memory/             # 对话记忆与持久化
+│   ├── xclaw-role/               # 角色管理与多智能体编排
 │   │   ├── src/
-│   │   │   ├── store.rs          # MemoryStore 实现
+│   │   │   ├── traits.rs         # RoleManager trait 定义
+│   │   │   ├── config.rs         # RoleConfig 结构体（AIOS 兼容）
+│   │   │   ├── fs_manager.rs     # FsRoleManager（文件系统实现）
+│   │   │   ├── orchestrator.rs   # 多 Role 编排与集群管理
+│   │   │   └── lib.rs
+│   │   └── Cargo.toml
+│   ├── xclaw-memory/             # 记忆持久化
+│   │   ├── src/
+│   │   │   ├── traits.rs         # MemoryStore + LongTermMemory + DailyMemory
+│   │   │   ├── fs_store.rs       # FsMemoryStore（文件系统记忆实现）
+│   │   │   ├── store.rs          # 分层存储（热/温/冷 — 对话历史）
 │   │   │   ├── sqlite.rs         # SQLite 温数据层
-│   │   │   ├── search.rs         # 向量搜索/FTS5 语义检索
+│   │   │   ├── search.rs         # 向量搜索/FTS5 语义检索（预留）
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
 │   ├── xclaw-skill/              # 技能系统
@@ -214,13 +235,13 @@ xclaw/
 
 ### 4.1 xclaw-core 基础定义层
 
-`xclaw-core` 是整个系统的类型基石，不包含业务逻辑，仅提供共享定义。几乎所有其他 crate 都依赖它。
+`xclaw-core` 是整个系统的类型基石，不包含业务逻辑，仅提供跨模块共享的基础类型。几乎所有其他 crate 都依赖它。
 
 **职责**：
-- Shared types：`Message`、`Role`、`SessionId`、`ToolCall` 等共享类型
+- Shared types：`Message`、`SessionId`、`RoleId`、`ToolCall` 等共享类型
 - Error types：全局错误类型层次
 
-> **注意**：所有核心 Trait（`AgentLoop`、`LlmProvider`、`MemoryStore`、`Skill`、`Channel` 等）已分别迁移至各自的模块 crate 中定义，详见各模块章节。
+> **架构原则**：所有 Trait 定义归属其所属的业务模块 crate（如 `MemoryStore` 在 `xclaw-memory`，`Tool` 在 `xclaw-tools`，`RoleManager` 在 `xclaw-role`），`xclaw-core` 不定义任何 Trait，仅提供各模块共用的基础类型。
 
 **依赖**：仅 `serde`、`serde_json`、`thiserror` — 零业务依赖
 
@@ -250,7 +271,7 @@ flowchart LR
 - 循环上限保护：单次对话最多 N 轮工具调用，防止失控
 - Session Manager 内置于此模块，负责会话创建、上下文隔离与生命周期管理
 
-**依赖**：`xclaw-core`、`xclaw-provider`、`xclaw-memory`、`xclaw-tools`、`xclaw-skill`、`xclaw-channel`、`xclaw-config`
+**依赖**：`xclaw-core`、`xclaw-role`、`xclaw-provider`、`xclaw-memory`、`xclaw-tools`、`xclaw-skill`、`xclaw-channel`、`xclaw-config`
 
 ### 4.3 Provider 抽象层
 
@@ -270,23 +291,231 @@ trait LlmProvider: Send + Sync {
 
 **依赖**：`xclaw-core`
 
-### 4.4 xclaw-memory 记忆与持久化
+### 4.4 xclaw-role 角色管理与多智能体编排
 
-独立的记忆系统模块，实现 `xclaw-core` 中定义的 `MemoryStore` trait。
+`xclaw-role` 负责 Role 的定义、生命周期管理和多 Role 编排。Role 是 xClaw 中智能体身份与记忆隔离的基本单位。
 
-采用分层存储策略：
+#### 4.4.1 Role 概念
+
+用户可定义不同的 Role 来完成不同工作，每个 Role 拥有独立的配置、system prompt 和记忆工作空间。
+
+```
+用户 ──┬── Role: default    （默认角色，通用 AI 助手）
+       ├── Role: secretary  （秘书，处理日程和邮件）
+       └── Role: coder      （编程助手，代码相关记忆）
+```
+
+- 系统内置 `default` Role，用户无需手动创建即可使用
+- Role 之间记忆完全隔离
+- Role 名称为 `snake_case`，作为文件系统目录名
+
+#### 4.4.2 Role 配置（AIOS 兼容）
+
+Role 配置对齐 [AIOS/Cerebrum](https://github.com/agiresearch/AIOS) Agent 配置规范，保持与 AIOS 生态的互操作性。每个 Role 有一个 `role.yaml` 配置文件：
+
+```yaml
+# roles/secretary/role.yaml
+name: secretary
+description:
+  - "负责日程管理、邮件处理和会议记录"
+  - "保持专业、简洁的沟通风格"
+system_prompt: |
+  你是用户的私人秘书，专注于日程管理和沟通协调。
+tools:
+  - shell
+  - file_read
+  - file_write
+meta:
+  author: user
+  version: "1.0.0"
+  license: private
+  created_at: 2026-03-25
+```
+
+**与 AIOS Agent config.json 的对应关系**：
+
+| AIOS 字段 | xClaw 字段 | 说明 |
+|-----------|-----------|------|
+| `name` | `name` | 角色标识符（snake_case） |
+| `description` | `description` | 角色描述（字符串数组） |
+| `tools` | `tools` | 可用工具白名单 |
+| `meta.author` | `meta.author` | 创建者 |
+| `meta.version` | `meta.version` | 语义化版本 |
+| `meta.license` | `meta.license` | 许可证 |
+| `build.entry` / `build.module` | — | AIOS 特有（Python 模块入口），xClaw 不需要 |
+| — | `system_prompt` | xClaw 扩展：内置 system prompt |
+| — | `meta.created_at` | xClaw 扩展：创建日期 |
+
+#### 4.4.3 文件系统布局
+
+```
+~/.xclaw/
+├── config.toml                     # 全局应用配置（已有）
+├── roles/                          # 所有 Role 的工作空间根目录
+│   ├── default/                    # 默认 Role
+│   │   ├── role.yaml               # Role 配置文件
+│   │   ├── MEMORY.md               # 长期记忆（提炼后的关键信息）
+│   │   └── memory/                 # 日常记忆目录
+│   │       ├── 2026-03-24.md       # 日常记忆（Append-only）
+│   │       └── 2026-03-25.md
+│   ├── secretary/
+│   │   ├── role.yaml
+│   │   ├── MEMORY.md
+│   │   └── memory/
+│   │       └── ...
+│   └── coder/
+│       ├── role.yaml
+│       ├── MEMORY.md
+│       └── memory/
+│           └── ...
+└── data/
+    └── memory.db                   # SQLite（预留，向量搜索用）
+```
+
+#### 4.4.4 Trait 设计
+
+```rust
+/// Role 生命周期管理（xclaw-role/src/traits.rs）
+pub trait RoleManager: Send + Sync {
+    async fn create_role(&self, config: RoleConfig) -> Result<(), XClawError>;
+    async fn get_role(&self, role: &RoleId) -> Result<RoleConfig, XClawError>;
+    async fn list_roles(&self) -> Result<Vec<RoleConfig>, XClawError>;
+    async fn delete_role(&self, role: &RoleId) -> Result<(), XClawError>;
+}
+```
+
+#### 4.4.5 多 Role 编排（集群管理）
+
+`xclaw-role` 还负责多智能体 Role 的编排，支持以下模式：
+
+```rust
+/// 多 Role 编排器（xclaw-role/src/orchestrator.rs）
+pub trait RoleOrchestrator: Send + Sync {
+    /// 提交任务给指定 Role 执行
+    async fn submit(&self, role: &RoleId, task: TaskInput) -> Result<TaskId, XClawError>;
+    /// 等待任务完成并获取结果
+    async fn await_result(&self, task_id: &TaskId) -> Result<TaskOutput, XClawError>;
+    /// 列出所有活跃的 Role 实例
+    async fn list_active(&self) -> Result<Vec<RoleStatus>, XClawError>;
+    /// 停止指定 Role 实例
+    async fn stop(&self, role: &RoleId) -> Result<(), XClawError>;
+}
+```
+
+**编排模式**（参考 AIOS Scheduler）：
+
+| 模式 | 说明 | 示例 |
+|------|------|------|
+| 串行委派 | 一个 Role 将子任务委派给另一个 Role | coder 请求 secretary 安排会议 |
+| 并行执行 | 多个 Role 同时处理独立任务 | coder 写代码 + secretary 回邮件 |
+| 管道协作 | Role 输出作为下一个 Role 的输入 | researcher → writer → editor |
+
+**与 AIOS 的对应关系**：
+- `submit` ↔ AIOS `submitAgent`（提交 agent 执行）
+- `await_result` ↔ AIOS `awaitAgentExecution`（等待执行结果）
+- `RoleStatus` ↔ AIOS 进程状态（pid, status, agent_name）
+
+**依赖**：仅 `xclaw-core`
+
+### 4.5 xclaw-memory 记忆持久化
+
+独立的记忆系统模块，按 `RoleId` 隔离，提供两套正交的记忆能力：
+
+- **角色记忆**（长期 + 日常）：基于文件系统的 Markdown 存储
+- **对话历史**：基于内存/SQLite 的会话级消息存储
+
+#### 4.5.1 记忆类型
+
+| 类型 | 文件 | 用途 | 写入策略 |
+|------|------|------|---------|
+| 长期记忆 | `MEMORY.md` | 经过提炼的关键决策、用户偏好、持久性事实 | 覆盖写入（提炼更新） |
+| 日常记忆 | `memory/YYYY-MM-DD.md` | 日常笔记、运行时上下文、流水账 | Append-only |
+
+**长期记忆**（`MEMORY.md`）：
+- 由 Agent 在 session 结束时自动提炼，或由用户手动编辑
+- 存储经过过滤和总结的持久性知识
+
+**日常记忆**（`memory/YYYY-MM-DD.md`）：
+- 每条记录带时间戳前缀，按自然日自动分文件
+- 只追加不修改，保证时间线完整性
+
+#### 4.5.2 Trait 设计
+
+```rust
+/// 长期记忆：提炼后的关键信息（MEMORY.md）
+pub trait LongTermMemory: Send + Sync {
+    async fn load(&self, role: &RoleId) -> Result<String, XClawError>;
+    async fn save(&self, role: &RoleId, content: &str) -> Result<(), XClawError>;
+}
+
+/// 日常记忆：Append-only 流水账（memory/YYYY-MM-DD.md）
+pub trait DailyMemory: Send + Sync {
+    async fn append(&self, role: &RoleId, entry: &str) -> Result<(), XClawError>;
+    async fn load_day(&self, role: &RoleId, date: &str) -> Result<String, XClawError>;
+    async fn list_days(&self, role: &RoleId) -> Result<Vec<String>, XClawError>;
+}
+```
+
+#### 4.5.3 与 MemoryStore 的关系
+
+现有 `MemoryStore` trait（session 粒度的 store/recall）保留不动，两者正交：
+
+| 维度 | MemoryStore（已有） | LongTermMemory + DailyMemory（新增） |
+|------|---------------------|--------------------------------------|
+| 粒度 | Session | Role |
+| 数据 | 对话消息 | 提炼的知识 / 日常笔记 |
+| 存储 | 内存 + SQLite | 文件系统（Markdown） |
+| 搜索 | 向量/FTS（未来） | 全文读取 + SQLite FTS（未来） |
+
+#### 4.5.4 对话历史分层存储（保留）
 
 | 层级 | 存储 | 用途 |
 |------|------|------|
 | 热数据 | 内存（`DashMap`） | 当前活跃会话上下文 |
-| 温数据 | SQLite | 近期对话历史、配置 |
-| 冷数据 | 文件系统（JSON） | 长期记忆、导出备份 |
+| 温数据 | SQLite | 近期对话历史 |
+| 冷数据 | 文件系统（JSON） | 历史导出备份 |
 
-**向量搜索**：可选集成 `qdrant`（嵌入式模式）或 SQLite FTS5 进行语义检索。
+#### 4.5.5 SQLite 向量搜索扩展点（预留）
+
+```rust
+/// 预留：语义搜索接口（暂不实现）
+pub trait MemorySearcher: Send + Sync {
+    async fn search(&self, role: &RoleId, query: &str, limit: usize)
+        -> Result<Vec<SearchResult>, XClawError>;
+    async fn index(&self, role: &RoleId) -> Result<(), XClawError>;
+}
+```
+
+- 可选集成 `sqlite-vss` 或 `qdrant`（嵌入式模式）
+- `memory.db` 放在 `~/.xclaw/data/` 下，不与 Role workspace 耦合
+
+#### 4.5.6 数据流
+
+```mermaid
+flowchart TD
+    User([用户]) --> Agent[xclaw-agent]
+    Agent --> RS{选择 Role}
+    RS --> Role[RoleId]
+
+    Role --> LTM["LongTermMemory\nMEMORY.md"]
+    Role --> DM["DailyMemory\nmemory/YYYY-MM-DD.md"]
+    Role --> MS["MemoryStore\nSession 对话历史"]
+
+    subgraph Prompt构建
+        LTM --> |注入长期记忆| PB[Prompt Builder]
+        DM --> |注入近期上下文| PB
+        MS --> |注入对话历史| PB
+    end
+
+    PB --> LLM[LLM Provider]
+    LLM --> |响应| Agent
+    Agent --> |追加日常记忆| DM
+    Agent --> |提炼更新| LTM
+```
 
 **依赖**：`xclaw-core`
 
-### 4.5 xclaw-skill 技能系统
+### 4.6 xclaw-skill 技能系统
 
 Skill 是高级编排能力，组合 Prompt 模板与执行逻辑，形成可复用的 Agent 行为模式。
 
@@ -311,7 +540,7 @@ trait SkillRegistry: Send + Sync {
 
 **依赖**：仅 `xclaw-core`
 
-### 4.6 xclaw-tools 原子工具层
+### 4.7 xclaw-tools 原子工具层
 
 `xclaw-tools` 提供 Agent 可调用的原子工具能力。每个 Tool 是无状态、无上下文感知的单次操作，与 Skill（高级编排）形成互补。
 
@@ -377,7 +606,7 @@ impl ToolRegistry {
 
 **依赖**：`xclaw-core`
 
-### 4.7 Gateway 控制平面
+### 4.8 Gateway 控制平面
 
 基于 axum 构建的 HTTP/WS 服务器，是 Server/Desktop 模式下外部交互的统一入口。
 
@@ -387,6 +616,7 @@ impl ToolRegistry {
 | `/api/chat` | POST | 发送消息 |
 | `/api/chat/stream` | GET (SSE) | 流式对话 |
 | `/api/sessions` | GET/POST/DELETE | 会话管理 |
+| `/api/roles` | GET/POST/DELETE | 角色管理 |
 | `/api/memory` | GET/POST/DELETE | 记忆管理 |
 | `/api/config` | GET/PUT | 配置读写 |
 | `/api/channels` | GET/PUT | 通道状态 |
@@ -400,7 +630,7 @@ impl ToolRegistry {
 
 **依赖**：`xclaw-core`、`xclaw-agent`
 
-### 4.8 Channel 通道层
+### 4.9 Channel 通道层
 
 ```rust
 trait Channel: Send + Sync {
@@ -415,7 +645,7 @@ trait Channel: Send + Sync {
 
 **依赖**：`xclaw-core`
 
-### 4.9 Config Manager
+### 4.10 Config Manager
 
 ```
 配置加载优先级（高 → 低）：
@@ -609,6 +839,8 @@ CMD ["xclaw-server", "--bind", "0.0.0.0:8080"]
 - `Channel` trait：新增消息通道
 - `Tool` trait：新增原子工具能力
 - `Skill` trait：新增高级技能编排
+- `RoleManager` / `RoleOrchestrator` trait：自定义角色管理和多智能体编排策略
+- `LongTermMemory` / `DailyMemory` trait：自定义记忆存储后端（如云同步、加密存储）
 - 前端组件：Svelte 组件化架构天然支持扩展
 
 ---
@@ -621,6 +853,7 @@ CMD ["xclaw-server", "--bind", "0.0.0.0:8080"]
 - **ADR-002**：选用 Tauri v2 作为桌面 Shell
 - **ADR-003**：选用 Svelte 5 作为前端框架
 - **ADR-004**：选用 SQLite 作为数据存储
+- **ADR-005**：采用 Role-based 文件优先记忆体系
 
 ---
 
