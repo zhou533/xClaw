@@ -144,6 +144,11 @@ xclaw/
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── types.rs      # WorkspaceFileKind 枚举、WorkspaceSnapshot
 │   │   │   │   └── loader.rs     # WorkspaceMemoryLoader trait + FsWorkspaceLoader
+│   │   │   ├── session/           # 会话管理子模块
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── types.rs      # SessionEntry, SessionIndex, TranscriptRecord, SessionSummary
+│   │   │   │   ├── store.rs      # SessionStore trait
+│   │   │   │   └── fs_store.rs   # FsSessionStore 实现（JSON 索引 + JSONL 转录）
 │   │   │   ├── fs_store.rs       # FsMemoryStore（文件系统记忆实现）
 │   │   │   ├── store.rs          # 分层存储（热/温/冷 — 对话历史）
 │   │   │   ├── sqlite.rs         # SQLite 温数据层
@@ -472,9 +477,13 @@ meta:
 │   │   ├── USER.md                 # 当前人类使用者的技术栈偏好
 │   │   ├── HEARTBEAT.md            # 心跳机制 / 长连接轮询应对动作参照
 │   │   ├── BOOTSTRAP.md            # 新工作区初始引导规范（仅限新工作区）
-│   │   └── memory/                 # 日常记忆目录
-│   │       ├── 2026-03-24.md       # 日常记忆（Append-only）
-│   │       └── 2026-03-25.md
+│   │   ├── memory/                 # 日常记忆目录
+│   │   │   ├── 2026-03-24.md       # 日常记忆（Append-only）
+│   │   │   └── 2026-03-25.md
+│   │   └── sessions/               # 会话管理目录
+│   │       ├── sessions.json       # 会话索引
+│   │       ├── {session_id}.jsonl  # 转录文件（JSONL）
+│   │       └── ...
 │   ├── secretary/
 │   │   ├── role.yaml
 │   │   ├── MEMORY.md
@@ -516,6 +525,7 @@ xclaw-memory 按 `RoleId` 隔离，提供两套正交的记忆能力：
 
 - **角色记忆**（长期 + 日常）：基于文件系统的 Markdown 存储
 - **对话历史**：基于内存/SQLite 的会话级消息存储
+- **会话管理**：基于文件系统的会话索引和转录持久化（JSON 索引 + JSONL 转录）
 
 #### 4.4.6 记忆类型
 
@@ -524,6 +534,7 @@ xclaw-memory 按 `RoleId` 隔离，提供两套正交的记忆能力：
 | 长期记忆 | `MEMORY.md` | 经过提炼的关键决策、用户偏好、持久性事实 | 覆盖写入（提炼更新） |
 | 日常记忆 | `memory/YYYY-MM-DD.md` | 日常笔记、运行时上下文、流水账 | Append-only |
 | 工作区记忆 | `AGENTS.md` / `SOUL.md` / `TOOLS.md` / `IDENTITY.md` / `USER.md` / `HEARTBEAT.md` / `BOOTSTRAP.md` | 角色人设、协作规范、工具引导等结构化上下文 | LLM 可读可写 |
+| 会话转录 | `sessions/{session_id}.jsonl` | 完整对话历史（JSONL 格式） | Append-only |
 
 **长期记忆**（`MEMORY.md`）：
 - 由 Agent 在 session 结束时自动提炼，或由用户手动编辑
@@ -550,7 +561,44 @@ pub trait DailyMemory: Send + Sync {
 }
 ```
 
-#### 4.4.8 与 MemoryStore 的关系
+#### 4.4.8 会话管理（Session System）
+
+xclaw-memory 提供基于文件系统的会话索引和转录持久化能力。每个 Role 下维护独立的会话空间。
+
+**双标识符体系**：
+- **SessionKey**（`{role_id}:{scope}`）：外部语义标识符，由 channel adapter 定义
+- **SessionId**（UUID v4）：内部存储标识符，用于文件名
+
+**存储格式**：
+- 会话索引：`sessions/sessions.json`（JSON，含 `version` 字段支持迁移）
+- 转录记录：`sessions/{session_id}.jsonl`（JSONL，追加 O(1)）
+
+```rust
+/// 会话存储与转录持久化（xclaw-memory/src/session/store.rs）
+/// 非 dyn-safe（使用 impl Future），与项目其他 trait 一致。
+/// 并发约束：调用方必须保证同一 SessionKey 的操作串行执行。
+pub trait SessionStore: Send + Sync {
+    fn get_or_create(&self, role: &RoleId, key: &SessionKey)
+        -> impl Future<Output = Result<SessionEntry, MemoryError>> + Send;
+    fn append_transcript(&self, role: &RoleId, session_id: &SessionId, record: &TranscriptRecord)
+        -> impl Future<Output = Result<SessionEntry, MemoryError>> + Send;
+    fn load_transcript(&self, role: &RoleId, session_id: &SessionId)
+        -> impl Future<Output = Result<Vec<TranscriptRecord>, MemoryError>> + Send;
+    fn load_transcript_tail(&self, role: &RoleId, session_id: &SessionId, n: usize)
+        -> impl Future<Output = Result<Vec<TranscriptRecord>, MemoryError>> + Send;
+    fn session_summary(&self, role: &RoleId, session_id: &SessionId)
+        -> impl Future<Output = Result<SessionSummary, MemoryError>> + Send;
+    fn delete_session(&self, role: &RoleId, session_id: &SessionId)
+        -> impl Future<Output = Result<(), MemoryError>> + Send;
+    // ... get_by_id, get_by_key, list_sessions
+}
+```
+
+**Memory 桥接**：Session 层仅暴露数据读取（`load_transcript` / `load_transcript_tail`）和元数据（`SessionSummary`），Extraction/Injection 逻辑由 `xclaw-agent` 实现。
+
+> 详细设计参见 [session-system.md](session-system.md) 和 [ADR-006](adr/ADR-006-session-system.md)。
+
+#### 4.4.9 与 MemoryStore 的关系
 
 现有 `MemoryStore` trait（session 粒度的 store/recall）保留不动，两者正交：
 
@@ -561,7 +609,7 @@ pub trait DailyMemory: Send + Sync {
 | 存储 | 内存 + SQLite | 文件系统（Markdown） |
 | 搜索 | 向量/FTS（未来） | 全文读取 + SQLite FTS（未来） |
 
-#### 4.4.9 对话历史分层存储（保留）
+#### 4.4.10 对话历史分层存储（保留）
 
 | 层级 | 存储 | 用途 |
 |------|------|------|
@@ -569,7 +617,7 @@ pub trait DailyMemory: Send + Sync {
 | 温数据 | SQLite | 近期对话历史 |
 | 冷数据 | 文件系统（JSON） | 历史导出备份 |
 
-#### 4.4.10 SQLite 向量搜索扩展点（预留）
+#### 4.4.11 SQLite 向量搜索扩展点（预留）
 
 ```rust
 /// 预留：语义搜索接口（暂不实现）
@@ -583,7 +631,7 @@ pub trait MemorySearcher: Send + Sync {
 - 可选集成 `sqlite-vss` 或 `qdrant`（嵌入式模式）
 - `memory.db` 放在 `~/.xclaw/data/` 下，不与 Role workspace 耦合
 
-#### 4.4.11 工作区记忆文件（Workspace Memory Files）
+#### 4.4.12 工作区记忆文件（Workspace Memory Files）
 
 工作区记忆文件是 Role 级别的 Markdown 文件，为 Agent 提供结构化的上下文注入。每个文件有明确的语义用途，**LLM 可读可写**。
 
@@ -654,7 +702,7 @@ pub struct WorkspaceSnapshot {
 }
 ```
 
-#### 4.4.12 数据流
+#### 4.4.13 数据流
 
 ```mermaid
 flowchart TD
@@ -668,16 +716,19 @@ flowchart TD
     Role --> DM["DailyMemory\nmemory/YYYY-MM-DD.md"]
     Role --> WS["WorkspaceMemory\nAGENTS/SOUL/TOOLS/..md"]
     Role --> MS["MemoryStore\nSession 对话历史"]
+    Role --> SS["SessionStore\nsessions/{id}.jsonl"]
 
     subgraph Prompt构建
         LTM --> |注入长期记忆| PB[Prompt Builder]
         DM --> |注入近期上下文| PB
         WS --> |注入工作区记忆| PB
         MS --> |注入对话历史| PB
+        SS --> |注入转录上下文| PB
     end
 
     PB --> LLM[LLM Provider]
     LLM --> |响应| Agent[Agent Loop]
+    Agent --> |追加转录| SS
     Agent --> |追加日常记忆| DM
     Agent --> |提炼更新| LTM
 
@@ -1033,6 +1084,7 @@ CMD ["xclaw-server", "--bind", "0.0.0.0:8080"]
 - **ADR-003**：选用 Svelte 5 作为前端框架
 - **ADR-004**：选用 SQLite 作为数据存储
 - **ADR-005**：采用 Role-based 文件优先记忆体系
+- **ADR-006**：Session System 架构（文件系统会话索引 + JSONL 转录持久化）
 
 ---
 

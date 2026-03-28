@@ -13,6 +13,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
+uuid = { workspace = true }
 xclaw-core = { workspace = true }
 xclaw-tools = { workspace = true }
 

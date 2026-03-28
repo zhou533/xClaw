@@ -22,6 +22,21 @@ pub enum MemoryError {
 
     #[error("invalid date format: {0} (expected YYYY-MM-DD)")]
     InvalidDate(String),
+
+    #[error("session not found: {0}")]
+    SessionNotFound(String),
+
+    #[error("invalid session key: {0}")]
+    InvalidSessionKey(String),
+
+    #[error("transcript parse error at line {line}: {message}")]
+    TranscriptParse { line: usize, message: String },
+
+    #[error("session index corrupted: {0}")]
+    IndexCorrupted(String),
+
+    #[error("JSON parse error: {0}")]
+    JsonParse(String),
 }
 
 impl From<MemoryError> for XClawError {
@@ -79,5 +94,57 @@ mod tests {
         let xclaw_err: XClawError = mem_err.into();
         assert!(matches!(xclaw_err, XClawError::Memory(_)));
         assert!(xclaw_err.to_string().contains("role not found: test"));
+    }
+
+    // ── Session error variants ──
+
+    #[test]
+    fn session_not_found_display() {
+        let err = MemoryError::SessionNotFound("sess-abc".into());
+        assert_eq!(err.to_string(), "session not found: sess-abc");
+    }
+
+    #[test]
+    fn invalid_session_key_display() {
+        let err = MemoryError::InvalidSessionKey("bad-key".into());
+        assert_eq!(err.to_string(), "invalid session key: bad-key");
+    }
+
+    #[test]
+    fn transcript_parse_display() {
+        let err = MemoryError::TranscriptParse {
+            line: 42,
+            message: "unexpected token".into(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "transcript parse error at line 42: unexpected token"
+        );
+    }
+
+    #[test]
+    fn index_corrupted_display() {
+        let err = MemoryError::IndexCorrupted("missing version field".into());
+        assert_eq!(
+            err.to_string(),
+            "session index corrupted: missing version field"
+        );
+    }
+
+    #[test]
+    fn json_parse_display() {
+        let err = MemoryError::JsonParse("expected colon at line 3".into());
+        assert_eq!(
+            err.to_string(),
+            "JSON parse error: expected colon at line 3"
+        );
+    }
+
+    #[test]
+    fn session_errors_convert_to_xclaw_error() {
+        let err = MemoryError::SessionNotFound("sess-1".into());
+        let xclaw: XClawError = err.into();
+        assert!(matches!(xclaw, XClawError::Memory(_)));
+        assert!(xclaw.to_string().contains("session not found: sess-1"));
     }
 }

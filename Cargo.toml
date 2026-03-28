@@ -60,6 +60,9 @@ serde_yml = "0.0"
 # Async trait (for dyn-safe Tool implementations)
 async-trait = "0.1"
 
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
 # Test utilities
 tempfile = "3"
 mockito = "1"

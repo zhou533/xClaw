@@ -6,26 +6,31 @@ use crate::error::MemoryError;
 use crate::role::config::RoleConfig;
 use crate::role::daily::{DailyMemory, FsDailyMemory};
 use crate::role::manager::{FsRoleManager, RoleManager};
+use crate::session::FsSessionStore;
+use crate::session::store::SessionStore;
 use crate::workspace::loader::{FsMemoryFileLoader, MemoryFileLoader};
 
 /// Unified access to all memory subsystems.
 ///
 /// Generic over trait implementations so tests can substitute stubs.
 /// Use `MemorySystem::fs()` for the standard filesystem backend.
-pub struct MemorySystem<R, F, D>
+pub struct MemorySystem<R, F, D, S>
 where
     R: RoleManager,
     F: MemoryFileLoader,
     D: DailyMemory,
+    S: SessionStore,
 {
     pub roles: R,
     pub files: F,
     pub daily: D,
+    pub sessions: S,
     base_dir: PathBuf,
 }
 
 /// Type alias for the filesystem-backed memory system.
-pub type FsMemorySystem = MemorySystem<FsRoleManager, FsMemoryFileLoader, FsDailyMemory>;
+pub type FsMemorySystem =
+    MemorySystem<FsRoleManager, FsMemoryFileLoader, FsDailyMemory, FsSessionStore>;
 
 impl FsMemorySystem {
     /// Build a filesystem-backed `MemorySystem`.
@@ -37,16 +42,18 @@ impl FsMemorySystem {
             roles: FsRoleManager::new(&base_dir),
             files: FsMemoryFileLoader::new(&base_dir),
             daily: FsDailyMemory::new(&base_dir),
+            sessions: FsSessionStore::new(&base_dir),
             base_dir,
         }
     }
 }
 
-impl<R, F, D> MemorySystem<R, F, D>
+impl<R, F, D, S> MemorySystem<R, F, D, S>
 where
     R: RoleManager,
     F: MemoryFileLoader,
     D: DailyMemory,
+    S: SessionStore,
 {
     /// Ensure the `default` role exists (idempotent).
     pub async fn ensure_default_role(&self) -> Result<(), MemoryError> {
