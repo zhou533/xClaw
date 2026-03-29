@@ -286,17 +286,18 @@ pub struct PeerChain(pub Vec<PeerId>);
 
 ```mermaid
 flowchart LR
-  A[消息输入] --> B[Session\n上下文加载]
-  B --> C[Memory 注入]
+  A[消息输入] --> B[Role 路由\n三层 fallback]
+  B --> R[Session\n上下文加载]
+  R --> C[Memory 注入]
   C --> D[Prompt 构建]
   D --> E[LLM 调用]
   E --> F{需要工具调用?}
   F -- 是 --> G[Tool/Skill\nDispatch]
   G --> H[结果回注]
   H --> E
-  F -- 否 --> I[最终响应]
-  I --> J[通道回复]
-  J --> K[Memory 持久化]
+  F -- 否 --> I[Memory 持久化]
+  I --> K[最终响应]
+  K --> J[通道回复]
 ```
 
 **关键设计**：
@@ -304,6 +305,7 @@ flowchart LR
 - Tool/Skill 调用采用结构化 JSON Schema 描述，与 LLM 的 function calling 对接
 - 支持流式响应（SSE/WebSocket），提升用户体验
 - 循环上限保护：单次对话最多 N 轮工具调用，防止失控
+- Memory 持久化在通道回复之前执行（崩溃安全）；持久化失败不阻塞回复，降级为异步重试
 - Session Manager 内置于此模块，负责会话创建、上下文隔离与生命周期管理
 
 **Role 路由**（`router/` 子模块）：

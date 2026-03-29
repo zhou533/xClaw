@@ -19,4 +19,5 @@ xclaw-channel = { workspace = true }
 xclaw-config = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
 futures = { workspace = true }

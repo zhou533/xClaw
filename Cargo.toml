@@ -63,6 +63,9 @@ async-trait = "0.1"
 # UUID generation
 uuid = { version = "1", features = ["v4"] }
 
+# Readline / REPL
+rustyline = "15"
+
 # Test utilities
 tempfile = "3"
 mockito = "1"
