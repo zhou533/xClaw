@@ -481,3 +481,152 @@ async fn append_transcript_updates_updated_at() {
     // object since we rebuild the index).
     assert!(refreshed.updated_at >= original_updated);
 }
+
+// ─── 25. get_or_create_renews_expired_daily_session ────────────────────────
+
+#[tokio::test]
+async fn get_or_create_renews_expired_daily_session() {
+    use crate::session::policy::SessionPolicy;
+
+    let dir = TempDir::new().unwrap();
+    // reset_at_hour = 4, so sessions updated before 04:00 today are expired.
+    let s = FsSessionStore::with_policy(dir.path(), SessionPolicy::default());
+    let k = key("cli");
+
+    // Create a session, then manually backdate its updated_at to yesterday.
+    let entry = s.get_or_create(&k).await.unwrap();
+    let old_id = entry.session_id.clone();
+
+    // Overwrite the index with an old updated_at.
+    let index = s.read_index(&role()).unwrap();
+    let backdated: Vec<SessionEntry> = index
+        .sessions
+        .into_iter()
+        .map(|e| SessionEntry {
+            updated_at: "2020-01-01T01:00:00Z".into(),
+            ..e
+        })
+        .collect();
+    let new_index = SessionIndex {
+        version: index.version,
+        sessions: backdated,
+    };
+    s.write_index(&role(), &new_index).unwrap();
+
+    // Now get_or_create should detect expiry and create a new session.
+    let renewed = s.get_or_create(&k).await.unwrap();
+    assert_ne!(renewed.session_id, old_id, "should create new session");
+}
+
+// ─── 26. get_or_create_reuses_unexpired_session ────────────────────────────
+
+#[tokio::test]
+async fn get_or_create_reuses_unexpired_session() {
+    use crate::session::policy::SessionPolicy;
+
+    let dir = TempDir::new().unwrap();
+    let s = FsSessionStore::with_policy(dir.path(), SessionPolicy::default());
+    let k = key("cli");
+
+    let first = s.get_or_create(&k).await.unwrap();
+    let second = s.get_or_create(&k).await.unwrap();
+
+    assert_eq!(
+        first.session_id, second.session_id,
+        "unexpired session should be reused"
+    );
+}
+
+// ─── 27. get_or_create_renews_idle_expired_session ─────────────────────────
+
+#[tokio::test]
+async fn get_or_create_renews_idle_expired_session() {
+    use crate::session::policy::SessionPolicy;
+
+    let dir = TempDir::new().unwrap();
+    let policy = SessionPolicy {
+        reset_at_hour: 4,
+        idle_minutes: Some(1), // 1 minute idle timeout
+    };
+    let s = FsSessionStore::with_policy(dir.path(), policy);
+    let k = key("cli");
+
+    let entry = s.get_or_create(&k).await.unwrap();
+    let old_id = entry.session_id.clone();
+
+    // Backdate updated_at to 10 minutes ago (exceeds 1 min idle).
+    let index = s.read_index(&role()).unwrap();
+    let now_epoch = crate::session::time_util::now_epoch_secs();
+    let ten_min_ago = now_epoch - 600;
+    let (y, mo, d, h, mi, sc) = crate::session::time_util::epoch_to_ymd_hms(ten_min_ago);
+    let old_ts = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, sc);
+
+    let backdated: Vec<SessionEntry> = index
+        .sessions
+        .into_iter()
+        .map(|e| SessionEntry {
+            updated_at: old_ts.clone(),
+            ..e
+        })
+        .collect();
+    let new_index = SessionIndex {
+        version: index.version,
+        sessions: backdated,
+    };
+    s.write_index(&role(), &new_index).unwrap();
+
+    let renewed = s.get_or_create(&k).await.unwrap();
+    assert_ne!(renewed.session_id, old_id, "idle-expired should renew");
+}
+
+// ─── 28. reset_session_creates_new_session ─────────────────────────────────
+
+#[tokio::test]
+async fn reset_session_creates_new_session() {
+    let dir = TempDir::new().unwrap();
+    let s = store(&dir);
+    let k = key("cli");
+
+    let original = s.get_or_create(&k).await.unwrap();
+    let reset = s.reset_session(&k).await.unwrap();
+
+    assert_ne!(original.session_id, reset.session_id);
+    assert_eq!(reset.session_key, k);
+}
+
+// ─── 29. reset_session_preserves_old_session ───────────────────────────────
+
+#[tokio::test]
+async fn reset_session_preserves_old_session() {
+    let dir = TempDir::new().unwrap();
+    let s = store(&dir);
+    let k = key("cli");
+
+    let original = s.get_or_create(&k).await.unwrap();
+    s.reset_session(&k).await.unwrap();
+
+    let all = s.list_sessions(&role()).await.unwrap();
+    assert_eq!(all.len(), 2, "old + new session");
+    assert!(
+        all.iter().any(|e| e.session_id == original.session_id),
+        "old session should still exist"
+    );
+}
+
+// ─── 30. get_by_key_returns_latest_session ─────────────────────────────────
+
+#[tokio::test]
+async fn get_by_key_returns_latest_session() {
+    let dir = TempDir::new().unwrap();
+    let s = store(&dir);
+    let k = key("cli");
+
+    s.get_or_create(&k).await.unwrap();
+    let latest = s.reset_session(&k).await.unwrap();
+
+    let found = s.get_by_key(&k).await.unwrap().unwrap();
+    assert_eq!(
+        found.session_id, latest.session_id,
+        "get_by_key should return latest"
+    );
+}

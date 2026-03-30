@@ -20,4 +20,3 @@ xclaw-memory = { workspace = true }
 xclaw-provider = { workspace = true }
 xclaw-tools = { workspace = true }
 rustyline = { workspace = true }
-uuid = { workspace = true }

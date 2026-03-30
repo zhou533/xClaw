@@ -15,7 +15,7 @@ impl SessionId {
     /// Valid: non-empty, only `[a-zA-Z0-9-]`.
     pub fn new(id: impl Into<String>) -> Self {
         let id = id.into();
-        debug_assert!(
+        assert!(
             !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
             "SessionId must be non-empty and contain only [a-zA-Z0-9-], got: '{id}'"
         );

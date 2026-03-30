@@ -70,6 +70,12 @@ pub trait SessionStore: Send + Sync {
         session_id: &SessionId,
     ) -> impl Future<Output = Result<SessionSummary, MemoryError>> + Send;
 
+    /// Force-create a new session for the given key, regardless of expiry.
+    fn reset_session(
+        &self,
+        key: &SessionKey,
+    ) -> impl Future<Output = Result<SessionEntry, MemoryError>> + Send;
+
     /// Delete a session (remove from index + delete JSONL file).
     fn delete_session(
         &self,

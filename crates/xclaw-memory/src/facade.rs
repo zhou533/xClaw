@@ -7,6 +7,7 @@ use crate::role::config::RoleConfig;
 use crate::role::daily::{DailyMemory, FsDailyMemory};
 use crate::role::manager::{FsRoleManager, RoleManager};
 use crate::session::FsSessionStore;
+use crate::session::policy::SessionPolicy;
 use crate::session::store::SessionStore;
 use crate::workspace::loader::{FsMemoryFileLoader, MemoryFileLoader};
 
@@ -43,6 +44,18 @@ impl FsMemorySystem {
             files: FsMemoryFileLoader::new(&base_dir),
             daily: FsDailyMemory::new(&base_dir),
             sessions: FsSessionStore::new(&base_dir),
+            base_dir,
+        }
+    }
+
+    /// Build a filesystem-backed `MemorySystem` with a custom session policy.
+    pub fn fs_with_session_policy(base_dir: impl Into<PathBuf>, policy: SessionPolicy) -> Self {
+        let base_dir = base_dir.into();
+        Self {
+            roles: FsRoleManager::new(&base_dir),
+            files: FsMemoryFileLoader::new(&base_dir),
+            daily: FsDailyMemory::new(&base_dir),
+            sessions: FsSessionStore::with_policy(&base_dir, policy),
             base_dir,
         }
     }
@@ -107,6 +120,25 @@ mod tests {
         mem.ensure_default_role().await.unwrap(); // should not error
         let cfg = mem.roles.get_role(&RoleId::default()).await.unwrap();
         assert_eq!(cfg.name, "default");
+    }
+
+    #[tokio::test]
+    async fn fs_with_session_policy_uses_custom_policy() {
+        use crate::session::policy::SessionPolicy;
+        use xclaw_core::types::SessionKey;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let policy = SessionPolicy {
+            reset_at_hour: 12,
+            idle_minutes: Some(5),
+        };
+        let mem = FsMemorySystem::fs_with_session_policy(tmp.path(), policy);
+        mem.ensure_default_role().await.unwrap();
+
+        // Basic smoke test: create a session via the facade.
+        let key = SessionKey::parse("default:cli").unwrap();
+        let entry = mem.sessions.get_or_create(&key).await.unwrap();
+        assert!(!entry.session_id.as_str().is_empty());
     }
 
     #[tokio::test]

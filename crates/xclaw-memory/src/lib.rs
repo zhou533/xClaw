@@ -13,7 +13,8 @@ pub use facade::{FsMemorySystem, MemorySystem};
 pub use role::{DailyMemory, FsDailyMemory, FsRoleManager, RoleConfig, RoleManager, RoleMeta};
 pub use search::{MemorySearcher, SearchResult};
 pub use session::{
-    FsSessionStore, SessionEntry, SessionIndex, SessionStore, SessionSummary, TranscriptRecord,
+    FsSessionStore, SessionEntry, SessionIndex, SessionPolicy, SessionStore, SessionSummary,
+    TranscriptRecord,
 };
 pub use tools::register_memory_tools;
 pub use traits::{MemoryEntry, MemoryStore};

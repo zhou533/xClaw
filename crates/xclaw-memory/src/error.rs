@@ -37,6 +37,9 @@ pub enum MemoryError {
 
     #[error("JSON parse error: {0}")]
     JsonParse(String),
+
+    #[error("time parse error: {0}")]
+    TimeParse(String),
 }
 
 impl From<MemoryError> for XClawError {

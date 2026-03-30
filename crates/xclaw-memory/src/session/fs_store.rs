@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use xclaw_core::types::{RoleId, SessionId, SessionKey};
 
 use crate::error::MemoryError;
+use crate::session::policy::SessionPolicy;
 use crate::session::store::SessionStore;
 use crate::session::types::{SessionEntry, SessionIndex, SessionSummary, TranscriptRecord};
 
@@ -24,13 +25,23 @@ use crate::session::types::{SessionEntry, SessionIndex, SessionSummary, Transcri
 /// A `SessionStore` that persists sessions and transcripts to the local filesystem.
 pub struct FsSessionStore {
     base_dir: PathBuf,
+    policy: SessionPolicy,
 }
 
 impl FsSessionStore {
-    /// Create a new store rooted at `base_dir`.
+    /// Create a new store rooted at `base_dir` using the default policy.
     pub fn new(base_dir: impl Into<PathBuf>) -> Self {
         Self {
             base_dir: base_dir.into(),
+            policy: SessionPolicy::default(),
+        }
+    }
+
+    /// Create a new store with a custom session renewal policy.
+    pub fn with_policy(base_dir: impl Into<PathBuf>, policy: SessionPolicy) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            policy,
         }
     }
 
@@ -81,46 +92,24 @@ impl FsSessionStore {
         Ok(())
     }
 
-    fn now_utc() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+    /// Build a new `SessionEntry` for the given key (does not persist).
+    fn create_new_entry(&self, role_id: &RoleId, key: &SessionKey) -> SessionEntry {
+        let session_id = SessionId::new(uuid::Uuid::new_v4().to_string());
+        let now = super::time_util::now_utc();
+        let transcript_path = self
+            .sessions_dir(role_id)
+            .join(format!("{}.jsonl", session_id.as_str()))
+            .to_string_lossy()
+            .into_owned();
 
-        let (year, month, day, hour, min, sec) = epoch_to_ymd_hms(secs);
-        format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-            year, month, day, hour, min, sec
-        )
+        SessionEntry {
+            session_id,
+            session_key: key.clone(),
+            transcript_path,
+            created_at: now.clone(),
+            updated_at: now,
+        }
     }
-}
-
-/// Convert Unix epoch seconds to (year, month, day, hour, min, sec) UTC.
-///
-/// Uses the Gregorian calendar algorithm (no external dependency).
-fn epoch_to_ymd_hms(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
-    let sec = (secs % 60) as u32;
-    let mins = secs / 60;
-    let min = (mins % 60) as u32;
-    let hours = mins / 60;
-    let hour = (hours % 24) as u32;
-    let days = hours / 24;
-
-    // Civil date from Julian Day Number
-    // Algorithm from https://howardhinnant.github.io/date_algorithms.html
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z % 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = if month <= 2 { y + 1 } else { y } as u32;
-
-    (year, month, day, hour, min, sec)
 }
 
 // ─── SessionStore impl ────────────────────────────────────────────────────────
@@ -135,33 +124,24 @@ impl SessionStore for FsSessionStore {
         async move {
             let index = self.read_index(&role_id)?;
 
-            // Return existing session if found.
+            // Find the latest matching session (last match = most recently created).
             let key_str = key.to_string();
             if let Some(entry) = index
                 .sessions
                 .iter()
+                .rev()
                 .find(|e| e.session_key.to_string() == key_str)
             {
-                return Ok(entry.clone());
+                // Check expiry — if not expired, reuse.
+                let now = super::time_util::now_epoch_secs();
+                let expired = super::expiry::is_expired(&entry.updated_at, now, &self.policy)?;
+                if !expired {
+                    return Ok(entry.clone());
+                }
             }
 
-            // Create a new session.
-            let session_id = SessionId::new(uuid::Uuid::new_v4().to_string());
-            let now = Self::now_utc();
-            let transcript_rel = format!("{}.jsonl", session_id.as_str());
-            let transcript_path = self
-                .sessions_dir(&role_id)
-                .join(&transcript_rel)
-                .to_string_lossy()
-                .into_owned();
-
-            let entry = SessionEntry {
-                session_id,
-                session_key: key,
-                transcript_path,
-                created_at: now.clone(),
-                updated_at: now,
-            };
+            // Create a new session (no match, or existing one expired).
+            let entry = self.create_new_entry(&role_id, &key);
 
             // Immutable update: build a new index with the new entry appended.
             let new_sessions: Vec<SessionEntry> = index
@@ -205,9 +185,11 @@ impl SessionStore for FsSessionStore {
         let key_str = key.to_string();
         async move {
             let index = self.read_index(&role_id)?;
+            // Return the latest (most recently created) matching session.
             let entry = index
                 .sessions
                 .into_iter()
+                .rev()
                 .find(|e| e.session_key.to_string() == key_str);
             Ok(entry)
         }
@@ -258,7 +240,7 @@ impl SessionStore for FsSessionStore {
             writeln!(file, "{}", line)?;
 
             // Update `updated_at` in the index (immutable rebuild).
-            let now = Self::now_utc();
+            let now = super::time_util::now_utc();
             let new_sessions: Vec<SessionEntry> = index
                 .sessions
                 .into_iter()
@@ -371,6 +353,32 @@ impl SessionStore for FsSessionStore {
                 first_message_at,
                 last_message_at,
             })
+        }
+    }
+
+    fn reset_session(
+        &self,
+        key: &SessionKey,
+    ) -> impl std::future::Future<Output = Result<SessionEntry, MemoryError>> + Send {
+        let role_id = key.role_id().clone();
+        let key = key.clone();
+        async move {
+            let index = self.read_index(&role_id)?;
+            let entry = self.create_new_entry(&role_id, &key);
+
+            let new_sessions: Vec<SessionEntry> = index
+                .sessions
+                .iter()
+                .cloned()
+                .chain(std::iter::once(entry.clone()))
+                .collect();
+            let new_index = SessionIndex {
+                version: index.version,
+                sessions: new_sessions,
+            };
+            self.write_index(&role_id, &new_index)?;
+
+            Ok(entry)
         }
     }
 

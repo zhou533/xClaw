@@ -79,17 +79,44 @@ async fn run_oneshot(
 
 /// Interactive REPL mode: multi-turn conversation loop.
 async fn run_interactive(ctx: &setup::AppContext, session_scope: Option<&str>) -> Result<()> {
-    let default_scope = format!("repl-{}", uuid::Uuid::new_v4());
-    let scope = session_scope.unwrap_or(&default_scope);
-    let session_id = SessionId::new(scope);
-
+    let session_id = session_id_from_scope(session_scope);
     dispatch_provider!(ctx, |agent| repl::run_repl(&agent, &session_id).await)
 }
 
 /// Derive a `SessionId` from an optional scope string.
+///
+/// When `scope` is `None` or empty, defaults to `"cli"` — the unified
+/// scope for all CLI modes (one-shot and REPL).
 fn session_id_from_scope(scope: Option<&str>) -> SessionId {
     match scope {
         Some(s) if !s.is_empty() => SessionId::new(s),
-        _ => SessionId::new("cli-oneshot"),
+        _ => SessionId::new("cli"),
+    }
+}
+
+// ─── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── session_id_from_scope ───────────────────────────────────────────
+
+    #[test]
+    fn scope_none_defaults_to_cli() {
+        let sid = session_id_from_scope(None);
+        assert_eq!(sid.as_str(), "cli");
+    }
+
+    #[test]
+    fn scope_empty_string_defaults_to_cli() {
+        let sid = session_id_from_scope(Some(""));
+        assert_eq!(sid.as_str(), "cli");
+    }
+
+    #[test]
+    fn scope_custom_value_is_preserved() {
+        let sid = session_id_from_scope(Some("my-session"));
+        assert_eq!(sid.as_str(), "my-session");
     }
 }

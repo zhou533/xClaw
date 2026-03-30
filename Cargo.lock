@@ -2426,7 +2426,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
  "xclaw-agent",
  "xclaw-config",
  "xclaw-core",

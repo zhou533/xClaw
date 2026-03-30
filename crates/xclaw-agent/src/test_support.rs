@@ -118,6 +118,19 @@ impl SessionStore for StubSessionStore {
         Err(MemoryError::SessionNotFound("stub".into()))
     }
 
+    async fn reset_session(
+        &self,
+        key: &xclaw_core::types::SessionKey,
+    ) -> Result<SessionEntry, MemoryError> {
+        Ok(SessionEntry {
+            session_id: SessionId::new("reset-session"),
+            session_key: key.clone(),
+            transcript_path: "reset.jsonl".into(),
+            created_at: "2026-03-30T00:00:00Z".into(),
+            updated_at: "2026-03-30T00:00:00Z".into(),
+        })
+    }
+
     async fn delete_session(
         &self,
         _role_id: &RoleId,
