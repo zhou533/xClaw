@@ -125,9 +125,9 @@ macro_rules! dispatch_provider {
     }};
 }
 
-/// Default memory base directory: `~/.xclaw/memory`.
+/// Default memory base directory: `~/.xclaw/workspace`.
 fn memory_base_dir() -> PathBuf {
-    dirs_or_fallback().join("memory")
+    dirs_or_fallback().join("workspace")
 }
 
 fn dirs_or_fallback() -> PathBuf {
@@ -154,11 +154,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn memory_base_dir_ends_with_memory() {
+    fn memory_base_dir_ends_with_workspace() {
         let dir = memory_base_dir();
         assert!(
-            dir.ends_with("memory"),
-            "expected path ending with 'memory', got: {dir:?}"
+            dir.ends_with("workspace"),
+            "expected path ending with 'workspace', got: {dir:?}"
         );
     }
 
