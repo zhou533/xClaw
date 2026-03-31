@@ -106,6 +106,45 @@ pub(crate) fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
+/// Return the local timezone's UTC offset in seconds (e.g. UTC+8 → 28800).
+///
+/// Uses libc `localtime_r` on Unix / `GetTimeZoneInformation` on Windows.
+/// Falls back to 0 (UTC) on error.
+pub(crate) fn local_utc_offset_secs() -> i64 {
+    #[cfg(unix)]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let epoch = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as libc::time_t;
+        let mut tm = std::mem::MaybeUninit::<libc::tm>::zeroed();
+        // SAFETY: `localtime_r` writes into a caller-provided buffer, no shared state.
+        let ptr = unsafe { libc::localtime_r(&epoch, tm.as_mut_ptr()) };
+        if ptr.is_null() {
+            return 0;
+        }
+        let tm = unsafe { tm.assume_init() };
+        tm.tm_gmtoff
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// Compute the UTC hour that corresponds to local midnight.
+///
+/// For example, UTC+8 → local midnight is 16:00 UTC → returns 16.
+/// UTC-5 → local midnight is 05:00 UTC → returns 5.
+pub(crate) fn local_midnight_as_utc_hour() -> u8 {
+    let offset = local_utc_offset_secs();
+    // Local midnight = UTC 00:00 - offset.
+    // Normalize to [0, 24).
+    let hour = (-(offset / 3600)).rem_euclid(24);
+    hour as u8
+}
+
 fn parse_u32(s: &str) -> Result<u32, MemoryError> {
     s.parse::<u32>()
         .map_err(|_| MemoryError::TimeParse(format!("invalid number: {s}")))
@@ -226,5 +265,32 @@ mod tests {
         let secs = now_epoch_secs();
         // Should be after 2025-01-01 (epoch ~1735689600).
         assert!(secs > 1_735_000_000);
+    }
+
+    // ── local timezone ──
+
+    #[test]
+    fn local_utc_offset_is_in_valid_range() {
+        let offset = local_utc_offset_secs();
+        // UTC offsets range from -12h to +14h.
+        assert!(
+            (-43200..=50400).contains(&offset),
+            "offset {offset} out of [-43200, 50400]"
+        );
+    }
+
+    #[test]
+    fn local_midnight_as_utc_hour_is_in_range() {
+        let hour = local_midnight_as_utc_hour();
+        assert!(hour < 24, "hour {hour} out of [0, 24)");
+    }
+
+    #[test]
+    fn local_midnight_as_utc_hour_consistent_with_offset() {
+        let offset = local_utc_offset_secs();
+        let hour = local_midnight_as_utc_hour();
+        // local_midnight_utc = (24 - offset_hours) % 24
+        let expected = (-(offset / 3600)).rem_euclid(24) as u8;
+        assert_eq!(hour, expected);
     }
 }

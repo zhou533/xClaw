@@ -489,8 +489,14 @@ async fn get_or_create_renews_expired_daily_session() {
     use crate::session::policy::SessionPolicy;
 
     let dir = TempDir::new().unwrap();
-    // reset_at_hour = 4, so sessions updated before 04:00 today are expired.
-    let s = FsSessionStore::with_policy(dir.path(), SessionPolicy::default());
+    // Use explicit reset_at_hour=4 for deterministic test.
+    let s = FsSessionStore::with_policy(
+        dir.path(),
+        SessionPolicy {
+            reset_at_hour: 4,
+            idle_minutes: None,
+        },
+    );
     let k = key("cli");
 
     // Create a session, then manually backdate its updated_at to yesterday.
@@ -525,7 +531,14 @@ async fn get_or_create_reuses_unexpired_session() {
     use crate::session::policy::SessionPolicy;
 
     let dir = TempDir::new().unwrap();
-    let s = FsSessionStore::with_policy(dir.path(), SessionPolicy::default());
+    // Use explicit policy for deterministic test.
+    let s = FsSessionStore::with_policy(
+        dir.path(),
+        SessionPolicy {
+            reset_at_hour: 4,
+            idle_minutes: None,
+        },
+    );
     let k = key("cli");
 
     let first = s.get_or_create(&k).await.unwrap();

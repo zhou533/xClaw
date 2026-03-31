@@ -66,6 +66,9 @@ uuid = { version = "1", features = ["v4"] }
 # Readline / REPL
 rustyline = "15"
 
+# Platform (timezone detection)
+libc = "0.2"
+
 # Test utilities
 tempfile = "3"
 mockito = "1"

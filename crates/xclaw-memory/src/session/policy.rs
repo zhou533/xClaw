@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::MemoryError;
 
-/// Default daily reset hour (UTC).
-pub const DEFAULT_RESET_AT_HOUR: u8 = 4;
+/// Fallback daily reset hour (UTC) when timezone detection fails.
+pub const FALLBACK_RESET_AT_HOUR: u8 = 4;
 
 /// Controls when a session is considered expired and should be renewed.
 ///
@@ -37,9 +37,11 @@ impl SessionPolicy {
 }
 
 impl Default for SessionPolicy {
+    /// Default policy: reset at local midnight (detected via timezone), no idle timeout.
     fn default() -> Self {
+        let hour = crate::session::time_util::local_midnight_as_utc_hour();
         Self {
-            reset_at_hour: DEFAULT_RESET_AT_HOUR,
+            reset_at_hour: hour,
             idle_minutes: None,
         }
     }
@@ -50,9 +52,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_uses_hour_4_no_idle() {
+    fn default_uses_local_midnight_no_idle() {
         let p = SessionPolicy::default();
-        assert_eq!(p.reset_at_hour, 4);
+        let expected = crate::session::time_util::local_midnight_as_utc_hour();
+        assert_eq!(p.reset_at_hour, expected);
         assert_eq!(p.idle_minutes, None);
     }
 
