@@ -376,23 +376,10 @@ mod tests {
 
     #[test]
     fn message_ordering_system_history_user() {
+        use crate::session::{assistant_output_to_transcript, user_input_to_transcript};
         let history = vec![
-            TranscriptRecord {
-                role: "user".into(),
-                content: "q1".into(),
-                timestamp: "1".into(),
-                tool_call_id: None,
-                tool_name: None,
-                metadata: None,
-            },
-            TranscriptRecord {
-                role: "assistant".into(),
-                content: "a1".into(),
-                timestamp: "2".into(),
-                tool_call_id: None,
-                tool_name: None,
-                metadata: None,
-            },
+            user_input_to_transcript("q1"),
+            assistant_output_to_transcript("a1"),
         ];
         let req = ChatRequestBuilder::new("gpt-4o")
             .with_system_prompt("sys")

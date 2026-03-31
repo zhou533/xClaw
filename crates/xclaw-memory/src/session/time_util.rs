@@ -88,7 +88,7 @@ pub(crate) fn parse_iso8601_to_epoch(s: &str) -> Result<u64, MemoryError> {
 }
 
 /// Current UTC time as an ISO 8601 string (`YYYY-MM-DDThh:mm:ssZ`).
-pub(crate) fn now_utc() -> String {
+pub fn now_utc() -> String {
     let secs = now_epoch_secs();
     let (year, month, day, hour, min, sec) = epoch_to_ymd_hms(secs);
     format!(

@@ -2,9 +2,14 @@
 //!
 //! Included from `fs_store.rs` via `#[path]` to keep the impl file under 800 lines.
 
+use std::collections::HashMap;
+
 use super::*;
 use tempfile::TempDir;
 use xclaw_core::types::{RoleId, SessionId, SessionKey};
+
+use crate::session::record_id::generate_record_id;
+use crate::session::types::{ContentBlock, TranscriptRole};
 
 // ── Helpers ──
 
@@ -16,14 +21,20 @@ fn key(scope: &str) -> SessionKey {
     SessionKey::parse(&format!("default:{scope}")).unwrap()
 }
 
-fn record(role_str: &str, content: &str) -> TranscriptRecord {
+fn record(role_val: TranscriptRole, content: &str) -> TranscriptRecord {
     TranscriptRecord {
-        role: role_str.to_string(),
-        content: content.to_string(),
+        id: generate_record_id(),
+        parent_id: None,
+        role: role_val,
+        content: vec![ContentBlock::Text {
+            text: content.to_string(),
+        }],
         timestamp: "2026-03-28T10:00:00Z".to_string(),
-        tool_call_id: None,
-        tool_name: None,
-        metadata: None,
+        model: None,
+        stop_reason: None,
+        usage: None,
+        provider: None,
+        metadata: HashMap::new(),
     }
 }
 
@@ -264,19 +275,19 @@ async fn append_and_load_transcript() {
     let entry = s.get_or_create(&k).await.unwrap();
     let sid = &entry.session_id;
 
-    s.append_transcript(&role(), sid, &record("user", "hello"))
+    s.append_transcript(&role(), sid, &record(TranscriptRole::User, "hello"))
         .await
         .unwrap();
-    s.append_transcript(&role(), sid, &record("assistant", "hi there"))
+    s.append_transcript(&role(), sid, &record(TranscriptRole::Assistant, "hi there"))
         .await
         .unwrap();
 
     let records = s.load_transcript(&role(), sid).await.unwrap();
     assert_eq!(records.len(), 2);
-    assert_eq!(records[0].role, "user");
-    assert_eq!(records[0].content, "hello");
-    assert_eq!(records[1].role, "assistant");
-    assert_eq!(records[1].content, "hi there");
+    assert_eq!(records[0].role, TranscriptRole::User);
+    assert_eq!(records[0].text_content(), "hello");
+    assert_eq!(records[1].role, TranscriptRole::Assistant);
+    assert_eq!(records[1].text_content(), "hi there");
 }
 
 // ─── 17. load_transcript_empty_file ─────────────────────────────────────────
@@ -303,7 +314,7 @@ async fn load_transcript_tolerates_corrupt_last_line() {
     let sid = &entry.session_id;
 
     // Write one valid line + one corrupt partial line directly to the file.
-    let valid_rec = record("user", "valid message");
+    let valid_rec = record(TranscriptRole::User, "valid message");
     let valid_json = serde_json::to_string(&valid_rec).unwrap();
     let transcript_path = s.transcript_path(&role(), sid);
     let content = format!("{valid_json}\n{{corrupt partial\n");
@@ -315,7 +326,7 @@ async fn load_transcript_tolerates_corrupt_last_line() {
         1,
         "corrupt last line should be tolerated/skipped"
     );
-    assert_eq!(records[0].content, "valid message");
+    assert_eq!(records[0].text_content(), "valid message");
 }
 
 // ─── 19. load_transcript_tail ───────────────────────────────────────────────
@@ -329,16 +340,20 @@ async fn load_transcript_tail() {
     let sid = &entry.session_id;
 
     for i in 0..5 {
-        s.append_transcript(&role(), sid, &record("user", &format!("msg {i}")))
-            .await
-            .unwrap();
+        s.append_transcript(
+            &role(),
+            sid,
+            &record(TranscriptRole::User, &format!("msg {i}")),
+        )
+        .await
+        .unwrap();
     }
 
     let tail = s.load_transcript_tail(&role(), sid, 3).await.unwrap();
     assert_eq!(tail.len(), 3);
-    assert_eq!(tail[0].content, "msg 2");
-    assert_eq!(tail[1].content, "msg 3");
-    assert_eq!(tail[2].content, "msg 4");
+    assert_eq!(tail[0].text_content(), "msg 2");
+    assert_eq!(tail[1].text_content(), "msg 3");
+    assert_eq!(tail[2].text_content(), "msg 4");
 }
 
 // ─── 20. session_summary_counts ─────────────────────────────────────────────
@@ -352,20 +367,32 @@ async fn session_summary_counts() {
     let sid = &entry.session_id;
 
     let r1 = TranscriptRecord {
-        role: "user".into(),
-        content: "first".into(),
+        id: generate_record_id(),
+        parent_id: None,
+        role: TranscriptRole::User,
+        content: vec![ContentBlock::Text {
+            text: "first".into(),
+        }],
         timestamp: "2026-03-28T10:00:00Z".into(),
-        tool_call_id: None,
-        tool_name: None,
-        metadata: None,
+        model: None,
+        stop_reason: None,
+        usage: None,
+        provider: None,
+        metadata: HashMap::new(),
     };
     let r2 = TranscriptRecord {
-        role: "assistant".into(),
-        content: "second".into(),
+        id: generate_record_id(),
+        parent_id: None,
+        role: TranscriptRole::Assistant,
+        content: vec![ContentBlock::Text {
+            text: "second".into(),
+        }],
         timestamp: "2026-03-28T10:01:00Z".into(),
-        tool_call_id: None,
-        tool_name: None,
-        metadata: None,
+        model: None,
+        stop_reason: None,
+        usage: None,
+        provider: None,
+        metadata: HashMap::new(),
     };
 
     s.append_transcript(&role(), sid, &r1).await.unwrap();
@@ -395,7 +422,7 @@ async fn delete_session_removes_entry_and_file() {
     let entry = s.get_or_create(&k).await.unwrap();
     let sid = entry.session_id.clone();
 
-    s.append_transcript(&role(), &sid, &record("user", "hi"))
+    s.append_transcript(&role(), &sid, &record(TranscriptRole::User, "hi"))
         .await
         .unwrap();
 
@@ -445,7 +472,7 @@ async fn append_to_nonexistent_session() {
     let dir = TempDir::new().unwrap();
     let s = store(&dir);
     let missing = SessionId::new("no-such-session");
-    let rec = record("user", "hello");
+    let rec = record(TranscriptRole::User, "hello");
 
     let result = s.append_transcript(&role(), &missing, &rec).await;
     assert!(result.is_err());
@@ -468,17 +495,19 @@ async fn append_transcript_updates_updated_at() {
     // Small delay to ensure timestamp differs.
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    s.append_transcript(&role(), &entry.session_id, &record("user", "hi"))
-        .await
-        .unwrap();
+    s.append_transcript(
+        &role(),
+        &entry.session_id,
+        &record(TranscriptRole::User, "hi"),
+    )
+    .await
+    .unwrap();
 
     let refreshed = s
         .get_by_id(&role(), &entry.session_id)
         .await
         .unwrap()
         .unwrap();
-    // updated_at should be >= original (may be same second, but not the exact same
-    // object since we rebuild the index).
     assert!(refreshed.updated_at >= original_updated);
 }
 
@@ -489,7 +518,6 @@ async fn get_or_create_renews_expired_daily_session() {
     use crate::session::policy::SessionPolicy;
 
     let dir = TempDir::new().unwrap();
-    // Use explicit reset_at_hour=4 for deterministic test.
     let s = FsSessionStore::with_policy(
         dir.path(),
         SessionPolicy {
@@ -499,7 +527,6 @@ async fn get_or_create_renews_expired_daily_session() {
     );
     let k = key("cli");
 
-    // Create a session, then manually backdate its updated_at to yesterday.
     let entry = s.get_or_create(&k).await.unwrap();
     let old_id = entry.session_id.clone();
 
@@ -519,7 +546,6 @@ async fn get_or_create_renews_expired_daily_session() {
     };
     s.write_index(&role(), &new_index).unwrap();
 
-    // Now get_or_create should detect expiry and create a new session.
     let renewed = s.get_or_create(&k).await.unwrap();
     assert_ne!(renewed.session_id, old_id, "should create new session");
 }
@@ -531,7 +557,6 @@ async fn get_or_create_reuses_unexpired_session() {
     use crate::session::policy::SessionPolicy;
 
     let dir = TempDir::new().unwrap();
-    // Use explicit policy for deterministic test.
     let s = FsSessionStore::with_policy(
         dir.path(),
         SessionPolicy {
@@ -559,7 +584,7 @@ async fn get_or_create_renews_idle_expired_session() {
     let dir = TempDir::new().unwrap();
     let policy = SessionPolicy {
         reset_at_hour: 4,
-        idle_minutes: Some(1), // 1 minute idle timeout
+        idle_minutes: Some(1),
     };
     let s = FsSessionStore::with_policy(dir.path(), policy);
     let k = key("cli");
@@ -567,12 +592,11 @@ async fn get_or_create_renews_idle_expired_session() {
     let entry = s.get_or_create(&k).await.unwrap();
     let old_id = entry.session_id.clone();
 
-    // Backdate updated_at to 10 minutes ago (exceeds 1 min idle).
     let index = s.read_index(&role()).unwrap();
     let now_epoch = crate::session::time_util::now_epoch_secs();
     let ten_min_ago = now_epoch - 600;
     let (y, mo, d, h, mi, sc) = crate::session::time_util::epoch_to_ymd_hms(ten_min_ago);
-    let old_ts = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, sc);
+    let old_ts = format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{sc:02}Z");
 
     let backdated: Vec<SessionEntry> = index
         .sessions

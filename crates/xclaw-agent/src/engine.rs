@@ -11,6 +11,7 @@ use xclaw_core::error::XClawError;
 use xclaw_core::types::{RoleId, SessionId};
 use xclaw_memory::role::daily::DailyMemory;
 use xclaw_memory::role::manager::RoleManager;
+use xclaw_memory::session::record_id::RecordId;
 use xclaw_memory::session::store::SessionStore;
 use xclaw_memory::session::types::SessionEntry;
 use xclaw_memory::workspace::loader::MemoryFileLoader;
@@ -249,6 +250,8 @@ where
 
             // Persist intermediate records (warn on failure, don't block)
             let assistant_records = response_to_transcript(&response);
+            let last_assistant_id: Option<RecordId> =
+                assistant_records.last().map(|r| r.id.clone());
             for rec in &assistant_records {
                 if let Err(e) = self
                     .sessions
@@ -263,6 +266,7 @@ where
                     &result.tool_call_id,
                     &result.tool_name,
                     result.content(),
+                    last_assistant_id.as_ref(),
                 );
                 if let Err(e) = self
                     .sessions

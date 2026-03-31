@@ -3,11 +3,16 @@
 pub(crate) mod expiry;
 pub mod fs_store;
 pub mod policy;
+pub mod record_id;
 pub mod store;
-pub(crate) mod time_util;
+pub mod time_util;
 pub mod types;
 
 pub use fs_store::FsSessionStore;
 pub use policy::SessionPolicy;
+pub use record_id::{RecordId, generate_record_id};
 pub use store::SessionStore;
-pub use types::{SessionEntry, SessionIndex, SessionSummary, TranscriptRecord};
+pub use types::{
+    ContentBlock, ImageSource, SessionEntry, SessionIndex, SessionSummary, StopReason, TokenUsage,
+    TranscriptRecord, TranscriptRole,
+};

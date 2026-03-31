@@ -1,9 +1,12 @@
 //! Integration tests for the Session subsystem via the MemorySystem facade.
 
+use std::collections::HashMap;
+
 use xclaw_core::types::{RoleId, SessionKey};
 use xclaw_memory::facade::FsMemorySystem;
+use xclaw_memory::session::record_id::generate_record_id;
 use xclaw_memory::session::store::SessionStore;
-use xclaw_memory::session::types::TranscriptRecord;
+use xclaw_memory::session::types::{ContentBlock, TranscriptRecord, TranscriptRole};
 
 fn setup() -> (tempfile::TempDir, FsMemorySystem) {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -11,14 +14,20 @@ fn setup() -> (tempfile::TempDir, FsMemorySystem) {
     (tmp, mem)
 }
 
-fn make_record(role: &str, content: &str) -> TranscriptRecord {
+fn make_record(role: TranscriptRole, content: &str) -> TranscriptRecord {
     TranscriptRecord {
-        role: role.into(),
-        content: content.into(),
+        id: generate_record_id(),
+        parent_id: None,
+        role,
+        content: vec![ContentBlock::Text {
+            text: content.into(),
+        }],
         timestamp: "2026-03-28T10:00:00Z".into(),
-        tool_call_id: None,
-        tool_name: None,
-        metadata: None,
+        model: None,
+        stop_reason: None,
+        usage: None,
+        provider: None,
+        metadata: HashMap::new(),
     }
 }
 
@@ -45,14 +54,18 @@ async fn session_transcript_append_and_load() {
     let role_id = key.role_id().clone();
 
     mem.sessions
-        .append_transcript(&role_id, &entry.session_id, &make_record("user", "hello"))
+        .append_transcript(
+            &role_id,
+            &entry.session_id,
+            &make_record(TranscriptRole::User, "hello"),
+        )
         .await
         .unwrap();
     mem.sessions
         .append_transcript(
             &role_id,
             &entry.session_id,
-            &make_record("assistant", "hi there"),
+            &make_record(TranscriptRole::Assistant, "hi there"),
         )
         .await
         .unwrap();
@@ -63,8 +76,8 @@ async fn session_transcript_append_and_load() {
         .await
         .unwrap();
     assert_eq!(transcript.len(), 2);
-    assert_eq!(transcript[0].content, "hello");
-    assert_eq!(transcript[1].content, "hi there");
+    assert_eq!(transcript[0].text_content(), "hello");
+    assert_eq!(transcript[1].text_content(), "hi there");
 }
 
 #[tokio::test]
@@ -75,15 +88,27 @@ async fn session_summary_via_facade() {
     let role_id = key.role_id().clone();
 
     mem.sessions
-        .append_transcript(&role_id, &entry.session_id, &make_record("user", "q1"))
+        .append_transcript(
+            &role_id,
+            &entry.session_id,
+            &make_record(TranscriptRole::User, "q1"),
+        )
         .await
         .unwrap();
     mem.sessions
-        .append_transcript(&role_id, &entry.session_id, &make_record("assistant", "a1"))
+        .append_transcript(
+            &role_id,
+            &entry.session_id,
+            &make_record(TranscriptRole::Assistant, "a1"),
+        )
         .await
         .unwrap();
     mem.sessions
-        .append_transcript(&role_id, &entry.session_id, &make_record("user", "q2"))
+        .append_transcript(
+            &role_id,
+            &entry.session_id,
+            &make_record(TranscriptRole::User, "q2"),
+        )
         .await
         .unwrap();
 
@@ -105,7 +130,11 @@ async fn session_delete_via_facade() {
     let role_id = key.role_id().clone();
 
     mem.sessions
-        .append_transcript(&role_id, &entry.session_id, &make_record("user", "bye"))
+        .append_transcript(
+            &role_id,
+            &entry.session_id,
+            &make_record(TranscriptRole::User, "bye"),
+        )
         .await
         .unwrap();
 
@@ -140,7 +169,11 @@ async fn session_transcript_jsonl_file_readable() {
     let role_id = key.role_id().clone();
 
     mem.sessions
-        .append_transcript(&role_id, &entry.session_id, &make_record("user", "test"))
+        .append_transcript(
+            &role_id,
+            &entry.session_id,
+            &make_record(TranscriptRole::User, "test"),
+        )
         .await
         .unwrap();
 
@@ -150,7 +183,7 @@ async fn session_transcript_jsonl_file_readable() {
     ));
     let raw = std::fs::read_to_string(&jsonl_path).unwrap();
     let parsed: TranscriptRecord = serde_json::from_str(raw.trim()).unwrap();
-    assert_eq!(parsed.content, "test");
+    assert_eq!(parsed.text_content(), "test");
 }
 
 #[tokio::test]
@@ -162,7 +195,6 @@ async fn session_with_role_workflow() {
     let entry = mem.sessions.get_or_create(&key).await.unwrap();
     assert_eq!(entry.session_key.scope(), "workspace");
 
-    // Confirm it's listed
     let role_id = RoleId::default();
     let sessions = mem.sessions.list_sessions(&role_id).await.unwrap();
     assert_eq!(sessions.len(), 1);

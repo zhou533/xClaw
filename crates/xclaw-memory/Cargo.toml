@@ -15,6 +15,7 @@ async-trait = { workspace = true }
 tempfile = { workspace = true }
 uuid = { workspace = true }
 libc = { workspace = true }
+nanoid = { workspace = true }
 xclaw-core = { workspace = true }
 xclaw-tools = { workspace = true }
 
