@@ -6,9 +6,13 @@ use xclaw_core::types::RoleId;
 
 use crate::error::MemoryError;
 use crate::role::config::RoleConfig;
+use crate::workspace::templates::ensure_bootstrap_templates;
 
 /// Role lifecycle manager.
 pub trait RoleManager: Send + Sync {
+    /// Return the directory path for a given role.
+    fn role_dir(&self, role: &RoleId) -> PathBuf;
+
     fn create_role(
         &self,
         config: RoleConfig,
@@ -47,16 +51,16 @@ impl FsRoleManager {
         self.base_dir.join("roles")
     }
 
-    fn role_dir(&self, role: &RoleId) -> PathBuf {
-        self.roles_dir().join(role.as_str())
-    }
-
     fn role_yaml_path(&self, role: &RoleId) -> PathBuf {
         self.role_dir(role).join("role.yaml")
     }
 }
 
 impl RoleManager for FsRoleManager {
+    fn role_dir(&self, role: &RoleId) -> PathBuf {
+        self.roles_dir().join(role.as_str())
+    }
+
     async fn create_role(&self, config: RoleConfig) -> Result<(), MemoryError> {
         let role_id = RoleId::new(&config.name)
             .map_err(|_| MemoryError::InvalidRoleId(config.name.clone()))?;
@@ -72,6 +76,9 @@ impl RoleManager for FsRoleManager {
         // Write role.yaml
         let yaml = config.to_yaml()?;
         tokio::fs::write(self.role_yaml_path(&role_id), yaml).await?;
+
+        // Seed bootstrap template files (idempotent; failures are only warnings)
+        ensure_bootstrap_templates(&role_dir).await;
 
         tracing::info!(role = config.name, "created role");
         Ok(())
@@ -274,5 +281,55 @@ mod tests {
         };
         let result = mgr.create_role(config).await;
         assert!(matches!(result, Err(MemoryError::InvalidRoleId(_))));
+    }
+
+    // ── Bootstrap template seeding ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_role_seeds_bootstrap_templates() {
+        use crate::workspace::templates::bootstrap_template;
+        use crate::workspace::types::MemoryFileKind;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mgr = test_manager(tmp.path());
+
+        let config = RoleConfig {
+            name: "writer".to_string(),
+            ..RoleConfig::default_config()
+        };
+        mgr.create_role(config).await.unwrap();
+
+        let role_dir = tmp.path().join("roles/writer");
+
+        // All 7 kinds with templates must exist
+        for kind in MemoryFileKind::all() {
+            if bootstrap_template(*kind).is_none() {
+                continue;
+            }
+            let path = role_dir.join(kind.filename());
+            assert!(
+                path.exists(),
+                "expected bootstrap file {} to exist after create_role",
+                kind.filename()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn create_role_does_not_create_heartbeat_template() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mgr = test_manager(tmp.path());
+
+        let config = RoleConfig {
+            name: "checker".to_string(),
+            ..RoleConfig::default_config()
+        };
+        mgr.create_role(config).await.unwrap();
+
+        let heartbeat = tmp.path().join("roles/checker/HEARTBEAT.md");
+        assert!(
+            !heartbeat.exists(),
+            "HEARTBEAT.md must not be written (no template)"
+        );
     }
 }

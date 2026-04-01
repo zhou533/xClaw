@@ -71,8 +71,12 @@ async fn facade_full_workflow() {
         .await
         .unwrap();
     let snap = mem.files.load_snapshot(&role).await.unwrap();
+    // Soul was explicitly saved above — must be present.
     assert!(snap.files[&MemoryFileKind::Soul].is_some());
-    assert!(snap.files[&MemoryFileKind::Agents].is_none());
+    // Agents is seeded from the bootstrap template on role creation — must also be present.
+    assert!(snap.files[&MemoryFileKind::Agents].is_some());
+    // Heartbeat has no template and was never written — must be absent.
+    assert!(snap.files[&MemoryFileKind::Heartbeat].is_none());
 }
 
 // ─── Tools Registration Tests ────────────────────────────────────────────────

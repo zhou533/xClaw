@@ -10,7 +10,6 @@ use crate::session::FsSessionStore;
 use crate::session::policy::SessionPolicy;
 use crate::session::store::SessionStore;
 use crate::workspace::loader::{FsMemoryFileLoader, MemoryFileLoader};
-
 /// Unified access to all memory subsystems.
 ///
 /// Generic over trait implementations so tests can substitute stubs.
@@ -69,11 +68,21 @@ where
     S: SessionStore,
 {
     /// Ensure the `default` role exists (idempotent).
+    ///
+    /// On a fresh install this calls `create_role`, which seeds all bootstrap
+    /// templates.  On an upgrade (role already exists) it calls
+    /// `ensure_bootstrap_templates` directly so any missing files are added.
     pub async fn ensure_default_role(&self) -> Result<(), MemoryError> {
         let default_id = xclaw_core::types::RoleId::default();
         match self.roles.get_role(&default_id).await {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                // Role exists — supplement any missing bootstrap templates.
+                let role_dir = self.roles.role_dir(&default_id);
+                crate::workspace::templates::ensure_bootstrap_templates(&role_dir).await;
+                Ok(())
+            }
             Err(MemoryError::RoleNotFound(_)) => {
+                // Fresh install — create_role handles template seeding.
                 self.roles.create_role(RoleConfig::default_config()).await
             }
             Err(e) => Err(e),
@@ -139,6 +148,49 @@ mod tests {
         let key = SessionKey::parse("default:cli").unwrap();
         let entry = mem.sessions.get_or_create(&key).await.unwrap();
         assert!(!entry.session_id.as_str().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ensure_default_role_supplements_missing_templates_on_existing_role() {
+        use crate::workspace::templates::bootstrap_template;
+        use crate::workspace::types::MemoryFileKind;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mem = FsMemorySystem::fs(tmp.path());
+
+        // Manually create the default role directory with only role.yaml
+        // (simulating an upgrade from before bootstrap templates were introduced)
+        let default_role_dir = tmp.path().join("roles/default");
+        tokio::fs::create_dir_all(default_role_dir.join("memory"))
+            .await
+            .unwrap();
+        let cfg = RoleConfig::default_config();
+        let yaml = cfg.to_yaml().unwrap();
+        tokio::fs::write(default_role_dir.join("role.yaml"), yaml)
+            .await
+            .unwrap();
+
+        // Precondition: no template files exist yet
+        assert!(
+            !default_role_dir.join("AGENTS.md").exists(),
+            "precondition: AGENTS.md must not exist before ensure_default_role"
+        );
+
+        // Act
+        mem.ensure_default_role().await.unwrap();
+
+        // Assert: all 7 template files were seeded
+        for kind in MemoryFileKind::all() {
+            if bootstrap_template(*kind).is_none() {
+                continue;
+            }
+            let path = default_role_dir.join(kind.filename());
+            assert!(
+                path.exists(),
+                "expected {} to be seeded by ensure_default_role on existing role",
+                kind.filename()
+            );
+        }
     }
 
     #[tokio::test]

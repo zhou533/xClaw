@@ -143,6 +143,10 @@ impl SessionStore for StubSessionStore {
 pub struct StubRoleManager;
 
 impl RoleManager for StubRoleManager {
+    fn role_dir(&self, role: &RoleId) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!("/stub/roles/{}", role.as_str()))
+    }
+
     async fn create_role(&self, _config: RoleConfig) -> Result<(), MemoryError> {
         Ok(())
     }
@@ -184,6 +188,14 @@ impl MemoryFileLoader for StubMemoryFileLoader {
         _content: &str,
     ) -> Result<(), MemoryError> {
         Ok(())
+    }
+
+    async fn delete_file(
+        &self,
+        _role: &RoleId,
+        _kind: MemoryFileKind,
+    ) -> Result<bool, MemoryError> {
+        Ok(false)
     }
 
     async fn load_snapshot(&self, _role: &RoleId) -> Result<MemorySnapshot, MemoryError> {
