@@ -78,12 +78,12 @@ async fn facade_full_workflow() {
 // ─── Tools Registration Tests ────────────────────────────────────────────────
 
 #[tokio::test]
-async fn register_memory_tools_adds_8_tools() {
+async fn register_memory_tools_adds_9_tools() {
     let (tmp, _mem) = setup();
     let mut registry = ToolRegistry::new();
     register_memory_tools(&mut registry, tmp.path().to_path_buf());
 
-    assert_eq!(registry.len(), 8);
+    assert_eq!(registry.len(), 9);
 
     // Verify all tool names
     let expected = [
@@ -93,6 +93,7 @@ async fn register_memory_tools_adds_8_tools() {
         "role_delete",
         "memory_file_read",
         "memory_file_write",
+        "memory_file_delete",
         "memory_daily_append",
         "memory_daily_read",
     ];

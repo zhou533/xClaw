@@ -28,6 +28,14 @@ pub trait MemoryFileLoader: Send + Sync {
         content: &str,
     ) -> impl std::future::Future<Output = Result<(), MemoryError>> + Send;
 
+    /// Delete a memory file. Returns `Ok(true)` if the file existed and was
+    /// deleted, `Ok(false)` if it did not exist.
+    fn delete_file(
+        &self,
+        role: &RoleId,
+        kind: MemoryFileKind,
+    ) -> impl std::future::Future<Output = Result<bool, MemoryError>> + Send;
+
     /// Load all memory files as a snapshot.
     fn load_snapshot(
         &self,
@@ -92,6 +100,15 @@ impl MemoryFileLoader for FsMemoryFileLoader {
         tokio::fs::write(tmp.path(), content).await?;
         tmp.persist(&path).map_err(|e| e.error)?;
         Ok(())
+    }
+
+    async fn delete_file(&self, role: &RoleId, kind: MemoryFileKind) -> Result<bool, MemoryError> {
+        let path = self.file_path(role, kind);
+        if !path.exists() {
+            return Ok(false);
+        }
+        tokio::fs::remove_file(&path).await?;
+        Ok(true)
     }
 
     async fn load_snapshot(&self, role: &RoleId) -> Result<MemorySnapshot, MemoryError> {
@@ -273,6 +290,63 @@ mod tests {
             .await
             .unwrap();
         assert!(tmp.path().join("roles/newrole/MEMORY.md").exists());
+    }
+
+    // ─── delete_file ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn delete_nonexistent_returns_false() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let loader = setup(tmp.path());
+        let result = loader
+            .delete_file(&RoleId::default(), MemoryFileKind::Soul)
+            .await
+            .unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn save_then_delete_returns_true() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let loader = setup(tmp.path());
+        let role = RoleId::default();
+
+        loader
+            .save_file(&role, MemoryFileKind::Soul, "persona")
+            .await
+            .unwrap();
+        let deleted = loader
+            .delete_file(&role, MemoryFileKind::Soul)
+            .await
+            .unwrap();
+        assert!(deleted);
+
+        let loaded = loader.load_file(&role, MemoryFileKind::Soul).await.unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let loader = setup(tmp.path());
+        let role = RoleId::default();
+
+        loader
+            .save_file(&role, MemoryFileKind::Agents, "data")
+            .await
+            .unwrap();
+
+        let first = loader
+            .delete_file(&role, MemoryFileKind::Agents)
+            .await
+            .unwrap();
+        assert!(first);
+
+        let second = loader
+            .delete_file(&role, MemoryFileKind::Agents)
+            .await
+            .unwrap();
+        assert!(!second);
     }
 
     #[tokio::test]

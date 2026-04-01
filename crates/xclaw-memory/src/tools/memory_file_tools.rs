@@ -83,6 +83,75 @@ impl Tool for MemoryFileReadTool {
     }
 }
 
+// ─── MemoryFileDeleteTool ───────────────────────────────────────────────────
+
+pub struct MemoryFileDeleteTool {
+    base_dir: PathBuf,
+}
+
+impl MemoryFileDeleteTool {
+    pub fn new(base_dir: &std::path::Path) -> Self {
+        Self {
+            base_dir: base_dir.to_path_buf(),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for MemoryFileDeleteTool {
+    fn name(&self) -> &str {
+        "memory_file_delete"
+    }
+
+    fn description(&self) -> &str {
+        "Delete a memory file (MEMORY.md, SOUL.md, AGENTS.md, etc.) for a role"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "role": { "type": "string", "description": "Role name (default: 'default')" },
+                "kind": {
+                    "type": "string",
+                    "enum": ["agents", "soul", "tools", "identity", "user", "heartbeat", "bootstrap", "long_term"],
+                    "description": "Memory file kind"
+                }
+            },
+            "required": ["kind"]
+        })
+    }
+
+    async fn execute(
+        &self,
+        _ctx: &ToolContext,
+        params: serde_json::Value,
+    ) -> Result<ToolOutput, ToolError> {
+        let role = parse_role(&params)?;
+        let kind = parse_kind(&params)?;
+
+        let loader = FsMemoryFileLoader::new(&self.base_dir);
+        let deleted = loader
+            .delete_file(&role, kind)
+            .await
+            .map_err(to_tool_error)?;
+
+        if deleted {
+            Ok(ToolOutput::success(format!(
+                "{} deleted for role '{}'",
+                kind.filename(),
+                role
+            )))
+        } else {
+            Ok(ToolOutput::success(format!(
+                "{} does not exist for role '{}'",
+                kind.filename(),
+                role
+            )))
+        }
+    }
+}
+
 // ─── MemoryFileWriteTool ────────────────────────────────────────────────────
 
 pub struct MemoryFileWriteTool {

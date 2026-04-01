@@ -122,6 +122,73 @@ async fn daily_list_days_sorted() {
     assert_eq!(days, vec!["2026-01-01", "2026-03-25", "2026-12-31"]);
 }
 
+// ─── delete_file ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn workspace_delete_existing_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let role = default_role();
+
+    loader
+        .save_file(&role, MemoryFileKind::Soul, "persona")
+        .await
+        .unwrap();
+    let deleted = loader
+        .delete_file(&role, MemoryFileKind::Soul)
+        .await
+        .unwrap();
+    assert!(deleted);
+
+    let loaded = loader.load_file(&role, MemoryFileKind::Soul).await.unwrap();
+    assert!(loaded.is_none());
+}
+
+#[tokio::test]
+async fn workspace_delete_nonexistent_returns_false() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let deleted = loader
+        .delete_file(&default_role(), MemoryFileKind::Tools)
+        .await
+        .unwrap();
+    assert!(!deleted);
+}
+
+#[tokio::test]
+async fn workspace_delete_then_snapshot_excludes_deleted() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let role = default_role();
+
+    loader
+        .save_file(&role, MemoryFileKind::Soul, "persona")
+        .await
+        .unwrap();
+    loader
+        .save_file(&role, MemoryFileKind::User, "prefs")
+        .await
+        .unwrap();
+    loader
+        .save_file(&role, MemoryFileKind::Agents, "agents")
+        .await
+        .unwrap();
+
+    // Delete only Soul
+    loader
+        .delete_file(&role, MemoryFileKind::Soul)
+        .await
+        .unwrap();
+
+    let snap = loader.load_snapshot(&role).await.unwrap();
+    assert!(snap.files[&MemoryFileKind::Soul].is_none());
+    assert_eq!(snap.files[&MemoryFileKind::User].as_deref(), Some("prefs"));
+    assert_eq!(
+        snap.files[&MemoryFileKind::Agents].as_deref(),
+        Some("agents")
+    );
+}
+
 // ─── MemoryFileLoader (workspace files) ─────────────────────────────────────
 
 #[tokio::test]

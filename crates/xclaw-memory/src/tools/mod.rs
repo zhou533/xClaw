@@ -77,7 +77,7 @@ mod tests {
     }
 }
 
-pub use memory_file_tools::{MemoryFileReadTool, MemoryFileWriteTool};
+pub use memory_file_tools::{MemoryFileDeleteTool, MemoryFileReadTool, MemoryFileWriteTool};
 pub use memory_tools::{MemoryDailyAppendTool, MemoryDailyReadTool};
 pub use role_tools::{RoleCreateTool, RoleDeleteTool, RoleGetTool, RoleListTool};
 
@@ -91,6 +91,7 @@ pub fn register_memory_tools(registry: &mut ToolRegistry, base_dir: PathBuf) {
     // Memory file tools
     registry.register(MemoryFileReadTool::new(&base_dir));
     registry.register(MemoryFileWriteTool::new(&base_dir));
+    registry.register(MemoryFileDeleteTool::new(&base_dir));
     // Daily tools
     registry.register(MemoryDailyAppendTool::new(&base_dir));
     registry.register(MemoryDailyReadTool::new(&base_dir));
