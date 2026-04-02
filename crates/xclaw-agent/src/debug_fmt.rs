@@ -12,6 +12,7 @@ use xclaw_provider::types::{ChatRequest, Role};
 const CYAN: &str = "\x1b[36m";
 const YELLOW: &str = "\x1b[33m";
 const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
 const BLUE: &str = "\x1b[34m";
 const MAGENTA: &str = "\x1b[35m";
 const DIM: &str = "\x1b[2m";
@@ -104,6 +105,55 @@ pub fn format_request_debug(request: &ChatRequest) -> String {
     out.push_str(&format!("{c}═══════════════════════════════{r}\n"));
 
     out
+}
+
+/// Maximum characters for tool arguments before truncation.
+const ARG_TRUNCATE_LEN: usize = 200;
+/// Maximum characters for tool result content before truncation.
+const CONTENT_TRUNCATE_LEN: usize = 300;
+
+/// Truncate a string to `max_len` characters, appending `...` if truncated.
+///
+/// Uses character-based indexing (not byte-based) so multibyte UTF-8 is safe.
+fn truncate(s: &str, max_len: usize) -> String {
+    let mut iter = s.char_indices();
+    match iter.nth(max_len) {
+        None => s.to_string(),
+        Some((byte_pos, _)) => format!("{}...", &s[..byte_pos]),
+    }
+}
+
+/// Format a debug line shown *before* a tool call is executed.
+///
+/// Includes tool name, call ID, and a truncated argument summary.
+/// The returned string always ends with a newline (`\n`).
+pub fn format_tool_call_detail(tool_name: &str, call_id: &str, arguments: &str) -> String {
+    let m = color(MAGENTA);
+    let d = color(DIM);
+    let r = color(RESET);
+    let args_display = truncate(arguments, ARG_TRUNCATE_LEN);
+    format!("{m}[TOOL_EXEC]{r} {tool_name} (id: {call_id})\n{d}  args: {args_display}{r}\n")
+}
+
+/// Format a debug line shown *after* a tool call completes.
+///
+/// Success results get a green `[TOOL_OK]` tag; errors get red `[TOOL_ERR]`.
+/// The returned string always ends with a newline (`\n`).
+pub fn format_tool_result_detail(
+    tool_name: &str,
+    call_id: &str,
+    is_error: bool,
+    content: &str,
+) -> String {
+    let r = color(RESET);
+    let content_display = truncate(content, CONTENT_TRUNCATE_LEN);
+    if is_error {
+        let red = color(RED);
+        format!("{red}[TOOL_ERR]{r} {tool_name} (id: {call_id}): {content_display}\n")
+    } else {
+        let g = color(GREEN);
+        format!("{g}[TOOL_OK]{r} {tool_name} (id: {call_id}): {content_display}\n")
+    }
 }
 
 /// Format a one-line summary for subsequent tool-loop rounds.
@@ -287,6 +337,112 @@ mod tests {
         assert!(out.contains("3 tool call(s)"));
         // No ANSI codes in test context (not a terminal)
         assert!(!out.contains(DIM));
+    }
+
+    // ── format_tool_call_detail tests ─────────────────────────────────
+
+    #[test]
+    fn tool_call_detail_contains_name_and_id() {
+        let out = format_tool_call_detail("file_read", "call_42", r#"{"path":"/tmp"}"#);
+        assert!(out.contains("[TOOL_EXEC]"));
+        assert!(out.contains("file_read"));
+        assert!(out.contains("call_42"));
+        assert!(out.contains(r#"{"path":"/tmp"}"#));
+    }
+
+    #[test]
+    fn tool_call_detail_truncates_long_args() {
+        let long_args = "x".repeat(250);
+        let out = format_tool_call_detail("echo", "c1", &long_args);
+        // Should contain first 200 chars + "..."
+        assert!(out.contains(&"x".repeat(200)));
+        assert!(out.contains("..."));
+        // Should NOT contain the full 250-char string
+        assert!(!out.contains(&"x".repeat(250)));
+    }
+
+    #[test]
+    fn tool_call_detail_no_truncation_when_short() {
+        let short_args = "x".repeat(200);
+        let out = format_tool_call_detail("echo", "c1", &short_args);
+        assert!(out.contains(&short_args));
+        assert!(!out.contains("..."));
+    }
+
+    // ── format_tool_result_detail tests ────────────────────────────────
+
+    #[test]
+    fn tool_result_detail_success() {
+        let out = format_tool_result_detail("echo", "c1", false, "hello world");
+        assert!(out.contains("[TOOL_OK]"));
+        assert!(out.contains("echo"));
+        assert!(out.contains("c1"));
+        assert!(out.contains("hello world"));
+        assert!(!out.contains("[TOOL_ERR]"));
+    }
+
+    #[test]
+    fn tool_result_detail_error() {
+        let out = format_tool_result_detail("fail", "c2", true, "something broke");
+        assert!(out.contains("[TOOL_ERR]"));
+        assert!(out.contains("fail"));
+        assert!(out.contains("c2"));
+        assert!(out.contains("something broke"));
+        assert!(!out.contains("[TOOL_OK]"));
+    }
+
+    #[test]
+    fn tool_result_detail_truncates_long_content() {
+        let long_content = "y".repeat(400);
+        let out = format_tool_result_detail("echo", "c1", false, &long_content);
+        assert!(out.contains(&"y".repeat(300)));
+        assert!(out.contains("..."));
+        assert!(!out.contains(&"y".repeat(400)));
+    }
+
+    #[test]
+    fn tool_result_detail_no_truncation_when_short() {
+        let content = "y".repeat(300);
+        let out = format_tool_result_detail("echo", "c1", true, &content);
+        assert!(out.contains(&content));
+        assert!(!out.contains("..."));
+    }
+
+    #[test]
+    fn tool_call_detail_no_ansi_in_test() {
+        let out = format_tool_call_detail("echo", "c1", "{}");
+        assert!(!out.contains(MAGENTA));
+        assert!(!out.contains(DIM));
+        assert!(!out.contains(RESET));
+    }
+
+    #[test]
+    fn tool_result_detail_no_ansi_in_test() {
+        let out = format_tool_result_detail("echo", "c1", false, "ok");
+        assert!(!out.contains(GREEN));
+        assert!(!out.contains(RED));
+        assert!(!out.contains(RESET));
+    }
+
+    // ── truncate tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_no_op_when_within_limit() {
+        assert_eq!(truncate("abc", 5), "abc");
+        assert_eq!(truncate("abcde", 5), "abcde");
+    }
+
+    #[test]
+    fn truncate_appends_ellipsis() {
+        assert_eq!(truncate("abcdef", 5), "abcde...");
+    }
+
+    #[test]
+    fn truncate_handles_multibyte_chars() {
+        // "日本語" is 3 chars, each 3 bytes — byte-slicing would panic
+        let s = "日本語abc";
+        let out = truncate(s, 3);
+        assert_eq!(out, "日本語...");
     }
 
     #[test]

@@ -36,11 +36,12 @@ impl ToolCallResult {
 /// Dispatches tool calls from LLM responses to the tool registry.
 pub struct ToolDispatcher<'a> {
     registry: &'a ToolRegistry,
+    debug: bool,
 }
 
 impl<'a> ToolDispatcher<'a> {
-    pub fn new(registry: &'a ToolRegistry) -> Self {
-        Self { registry }
+    pub fn new(registry: &'a ToolRegistry, debug: bool) -> Self {
+        Self { registry, debug }
     }
 
     /// Execute a batch of tool calls and return results.
@@ -58,6 +59,17 @@ impl<'a> ToolDispatcher<'a> {
         for tc in tool_calls {
             let tool_name = &tc.function.name;
             tracing::info!(tool = %tool_name, call_id = %tc.id, "dispatching tool call");
+
+            if self.debug {
+                eprint!(
+                    "{}",
+                    crate::debug_fmt::format_tool_call_detail(
+                        tool_name,
+                        &tc.id,
+                        &tc.function.arguments
+                    )
+                );
+            }
 
             let result = match self.registry.get(tool_name) {
                 None => {
@@ -115,6 +127,18 @@ impl<'a> ToolDispatcher<'a> {
                     }
                 }
             };
+
+            if self.debug {
+                eprint!(
+                    "{}",
+                    crate::debug_fmt::format_tool_result_detail(
+                        &result.tool_name,
+                        &result.tool_call_id,
+                        result.is_error(),
+                        result.content(),
+                    )
+                );
+            }
 
             results.push(result);
         }
@@ -242,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn dispatches_known_tool_successfully() {
         let reg = make_registry();
-        let dispatcher = ToolDispatcher::new(&reg);
+        let dispatcher = ToolDispatcher::new(&reg, false);
         let ctx = make_context();
 
         let calls = vec![make_tool_call("c1", "echo", r#"{"text":"hello"}"#)];
@@ -258,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_tool_returns_error_result() {
         let reg = make_registry();
-        let dispatcher = ToolDispatcher::new(&reg);
+        let dispatcher = ToolDispatcher::new(&reg, false);
         let ctx = make_context();
 
         let calls = vec![make_tool_call("c2", "nonexistent", "{}")];
@@ -272,7 +296,7 @@ mod tests {
     #[tokio::test]
     async fn tool_execution_error_captured_as_error_result() {
         let reg = make_registry();
-        let dispatcher = ToolDispatcher::new(&reg);
+        let dispatcher = ToolDispatcher::new(&reg, false);
         let ctx = make_context();
 
         let calls = vec![make_tool_call("c3", "fail", "{}")];
@@ -286,7 +310,7 @@ mod tests {
     #[tokio::test]
     async fn tool_error_output_mapped_correctly() {
         let reg = make_registry();
-        let dispatcher = ToolDispatcher::new(&reg);
+        let dispatcher = ToolDispatcher::new(&reg, false);
         let ctx = make_context();
 
         let calls = vec![make_tool_call("c4", "error_output", "{}")];
@@ -300,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn multiple_tool_calls_executed_in_order() {
         let reg = make_registry();
-        let dispatcher = ToolDispatcher::new(&reg);
+        let dispatcher = ToolDispatcher::new(&reg, false);
         let ctx = make_context();
 
         let calls = vec![
@@ -317,7 +341,7 @@ mod tests {
     #[tokio::test]
     async fn empty_tool_calls_returns_empty() {
         let reg = make_registry();
-        let dispatcher = ToolDispatcher::new(&reg);
+        let dispatcher = ToolDispatcher::new(&reg, false);
         let ctx = make_context();
 
         let results = dispatcher.execute_tool_calls(&[], &ctx).await;
@@ -327,7 +351,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_json_arguments_uses_null() {
         let reg = make_registry();
-        let dispatcher = ToolDispatcher::new(&reg);
+        let dispatcher = ToolDispatcher::new(&reg, false);
         let ctx = make_context();
 
         let calls = vec![make_tool_call("c5", "echo", "not json")];
@@ -336,6 +360,35 @@ mod tests {
         assert_eq!(results.len(), 1);
         // EchoTool defaults to "(no text)" when params don't have "text"
         assert_eq!(results[0].output, Ok("(no text)".to_string()));
+    }
+
+    #[tokio::test]
+    async fn debug_mode_does_not_affect_results() {
+        let reg = make_registry();
+        let dispatcher = ToolDispatcher::new(&reg, true);
+        let ctx = make_context();
+
+        let calls = vec![
+            make_tool_call("c1", "echo", r#"{"text":"hello"}"#),
+            make_tool_call("c2", "nonexistent", "{}"),
+            make_tool_call("c3", "fail", "{}"),
+            make_tool_call("c4", "error_output", "{}"),
+        ];
+        let results = dispatcher.execute_tool_calls(&calls, &ctx).await;
+
+        assert_eq!(results.len(), 4);
+        // Success
+        assert_eq!(results[0].output, Ok("hello".to_string()));
+        assert!(!results[0].is_error());
+        // Tool not found
+        assert!(results[1].is_error());
+        assert!(results[1].content().contains("tool not found"));
+        // Execution error
+        assert!(results[2].is_error());
+        assert!(results[2].content().contains("something broke"));
+        // Error output
+        assert!(results[3].is_error());
+        assert_eq!(results[3].content(), "file not found");
     }
 
     #[test]

@@ -208,7 +208,7 @@ where
         role_id: &RoleId,
         session_id: &SessionId,
     ) -> Result<(String, u32), XClawError> {
-        let dispatcher = ToolDispatcher::new(self.tool_registry);
+        let dispatcher = ToolDispatcher::new(self.tool_registry, self.config.debug);
         let tool_ctx = ToolContext::new(
             WorkspaceScope {
                 workspace_root: self.workspace_root.clone(),
