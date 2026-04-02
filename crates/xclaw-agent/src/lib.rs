@@ -1,4 +1,5 @@
 pub mod config;
+pub(crate) mod debug_fmt;
 pub mod dispatch;
 pub mod engine;
 pub mod r#loop;

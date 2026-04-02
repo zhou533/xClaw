@@ -95,6 +95,11 @@ where
     async fn process(&self, input: UserInput) -> Result<AgentResponse, XClawError> {
         let (session, role_id, request) = self.load_context_and_build_request(&input).await?;
 
+        // Debug: print assembled prompt to stderr
+        if self.config.debug {
+            eprint!("{}", crate::debug_fmt::format_request_debug(&request));
+        }
+
         // Persist user message before LLM call (crash-safe ordering)
         let user_rec = user_input_to_transcript(&input.content);
         if let Err(e) = self
@@ -178,7 +183,7 @@ where
         };
 
         let system_prompt = SystemPromptBuilder::new()
-            .with_role_config(&role_config)
+            .with_role_config(&role_config, &snapshot)
             .with_memory_snapshot(&snapshot)
             .with_daily_memory(daily_content.as_deref())
             .build();
@@ -239,6 +244,14 @@ where
             total_tool_calls += tool_calls.len() as u32;
 
             tracing::info!(round, tool_count = tool_calls.len(), "executing tool calls");
+
+            // Debug: print tool-loop round summary
+            if self.config.debug {
+                eprint!(
+                    "{}",
+                    crate::debug_fmt::format_tool_round_summary(round + 1, tool_calls.len())
+                );
+            }
 
             let results = dispatcher.execute_tool_calls(tool_calls, &tool_ctx).await;
 

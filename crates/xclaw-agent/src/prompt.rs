@@ -43,9 +43,21 @@ impl SystemPromptBuilder {
     }
 
     /// Add the base system prompt from role config.
-    /// If the role has an empty system_prompt, uses a sensible default.
-    pub fn with_role_config(mut self, config: &RoleConfig) -> Self {
-        let base = if config.system_prompt.is_empty() {
+    ///
+    /// Priority: BOOTSTRAP.md content (if present and non-empty in the snapshot)
+    /// takes precedence over `config.system_prompt`. Falls back to generating
+    /// a default prompt when both are absent/empty.
+    pub fn with_role_config(mut self, config: &RoleConfig, snapshot: &MemorySnapshot) -> Self {
+        let bootstrap = snapshot
+            .files
+            .get(&MemoryFileKind::Bootstrap)
+            .and_then(|opt| opt.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        let base = if let Some(content) = bootstrap {
+            content.to_string()
+        } else if config.system_prompt.is_empty() {
             format!(
                 "You are xClaw, a helpful AI assistant. Your role is: {}.",
                 config.name
@@ -256,16 +268,84 @@ mod tests {
             tools: vec![],
             meta: RoleMeta::default(),
         };
-        let prompt = SystemPromptBuilder::new().with_role_config(&config).build();
+        let snapshot = MemorySnapshot {
+            files: HashMap::new(),
+        };
+        let prompt = SystemPromptBuilder::new()
+            .with_role_config(&config, &snapshot)
+            .build();
         assert_eq!(prompt, "You are a secretary.");
     }
 
     #[test]
     fn with_role_config_empty_prompt_generates_default() {
         let config = RoleConfig::default_config();
-        let prompt = SystemPromptBuilder::new().with_role_config(&config).build();
+        let snapshot = MemorySnapshot {
+            files: HashMap::new(),
+        };
+        let prompt = SystemPromptBuilder::new()
+            .with_role_config(&config, &snapshot)
+            .build();
         assert!(prompt.contains("xClaw"));
         assert!(prompt.contains("default"));
+    }
+
+    #[test]
+    fn with_role_config_prefers_bootstrap_over_system_prompt() {
+        let config = RoleConfig {
+            name: "secretary".into(),
+            description: vec![],
+            system_prompt: "You are a secretary.".into(),
+            tools: vec![],
+            meta: RoleMeta::default(),
+        };
+        let mut files = HashMap::new();
+        files.insert(
+            MemoryFileKind::Bootstrap,
+            Some("Bootstrap instructions here.".to_string()),
+        );
+        let snapshot = MemorySnapshot { files };
+        let prompt = SystemPromptBuilder::new()
+            .with_role_config(&config, &snapshot)
+            .build();
+        assert_eq!(prompt, "Bootstrap instructions here.");
+        assert!(!prompt.contains("secretary"));
+    }
+
+    #[test]
+    fn with_role_config_falls_back_when_bootstrap_empty() {
+        let config = RoleConfig {
+            name: "secretary".into(),
+            description: vec![],
+            system_prompt: "You are a secretary.".into(),
+            tools: vec![],
+            meta: RoleMeta::default(),
+        };
+        let mut files = HashMap::new();
+        files.insert(MemoryFileKind::Bootstrap, Some("   ".to_string()));
+        let snapshot = MemorySnapshot { files };
+        let prompt = SystemPromptBuilder::new()
+            .with_role_config(&config, &snapshot)
+            .build();
+        assert_eq!(prompt, "You are a secretary.");
+    }
+
+    #[test]
+    fn with_role_config_falls_back_when_bootstrap_none() {
+        let config = RoleConfig {
+            name: "secretary".into(),
+            description: vec![],
+            system_prompt: "You are a secretary.".into(),
+            tools: vec![],
+            meta: RoleMeta::default(),
+        };
+        let mut files = HashMap::new();
+        files.insert(MemoryFileKind::Bootstrap, None);
+        let snapshot = MemorySnapshot { files };
+        let prompt = SystemPromptBuilder::new()
+            .with_role_config(&config, &snapshot)
+            .build();
+        assert_eq!(prompt, "You are a secretary.");
     }
 
     #[test]
@@ -329,7 +409,7 @@ mod tests {
         let snapshot = MemorySnapshot { files };
 
         let prompt = SystemPromptBuilder::new()
-            .with_role_config(&config)
+            .with_role_config(&config, &snapshot)
             .with_memory_snapshot(&snapshot)
             .with_daily_memory(Some("daily note"))
             .build();

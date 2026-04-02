@@ -24,6 +24,10 @@ enum Commands {
         /// Resume a previous session by ID
         #[arg(long)]
         session: Option<String>,
+
+        /// Print the assembled prompt to stderr before sending to LLM
+        #[arg(long)]
+        debug: bool,
     },
 }
 
@@ -39,12 +43,16 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Chat { message, session } => {
+        Commands::Chat {
+            message,
+            session,
+            debug,
+        } => {
             let ctx = setup::load_app_context().await?;
 
             match message {
-                Some(msg) => run_oneshot(&ctx, &msg, session.as_deref()).await,
-                None => run_interactive(&ctx, session.as_deref()).await,
+                Some(msg) => run_oneshot(&ctx, &msg, session.as_deref(), debug).await,
+                None => run_interactive(&ctx, session.as_deref(), debug).await,
             }
         }
     }
@@ -55,6 +63,7 @@ async fn run_oneshot(
     ctx: &setup::AppContext,
     message: &str,
     session_scope: Option<&str>,
+    debug: bool,
 ) -> Result<()> {
     let session_id = session_id_from_scope(session_scope);
     let input = UserInput {
@@ -62,7 +71,8 @@ async fn run_oneshot(
         content: message.to_string(),
     };
 
-    let resp = dispatch_provider!(ctx, |agent| {
+    let agent_config = ctx.agent_config.clone().with_debug(debug);
+    let resp = dispatch_provider!(ctx, agent_config, |agent| {
         agent
             .process(input)
             .await
@@ -78,9 +88,18 @@ async fn run_oneshot(
 }
 
 /// Interactive REPL mode: multi-turn conversation loop.
-async fn run_interactive(ctx: &setup::AppContext, session_scope: Option<&str>) -> Result<()> {
+async fn run_interactive(
+    ctx: &setup::AppContext,
+    session_scope: Option<&str>,
+    debug: bool,
+) -> Result<()> {
     let session_id = session_id_from_scope(session_scope);
-    dispatch_provider!(ctx, |agent| repl::run_repl(&agent, &session_id).await)
+    let agent_config = ctx.agent_config.clone().with_debug(debug);
+    dispatch_provider!(ctx, agent_config, |agent| repl::run_repl(
+        &agent,
+        &session_id
+    )
+    .await)
 }
 
 /// Derive a `SessionId` from an optional scope string.

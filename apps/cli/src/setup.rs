@@ -62,11 +62,12 @@ pub async fn load_app_context() -> Result<AppContext> {
 /// ```
 #[macro_export]
 macro_rules! dispatch_provider {
-    ($ctx:expr, |$agent:ident| $body:expr) => {{
+    ($ctx:expr, $agent_config:expr, |$agent:ident| $body:expr) => {{
         use xclaw_agent::LoopAgent;
         use xclaw_provider::{ClaudeProvider, MiniMaxProvider, OpenAiProvider};
 
         let ctx = &$ctx;
+        let agent_cfg = $agent_config;
         match ctx.provider_config.kind {
             xclaw_config::ProviderKind::OpenAi => {
                 let provider = OpenAiProvider::new(
@@ -76,7 +77,7 @@ macro_rules! dispatch_provider {
                 );
                 let $agent = LoopAgent::new(
                     provider,
-                    ctx.agent_config.clone(),
+                    agent_cfg,
                     &ctx.memory.sessions,
                     &ctx.memory.roles,
                     &ctx.memory.files,
@@ -93,7 +94,7 @@ macro_rules! dispatch_provider {
                 );
                 let $agent = LoopAgent::new(
                     provider,
-                    ctx.agent_config.clone(),
+                    agent_cfg,
                     &ctx.memory.sessions,
                     &ctx.memory.roles,
                     &ctx.memory.files,
@@ -111,7 +112,7 @@ macro_rules! dispatch_provider {
                 .context("failed to create MiniMax provider")?;
                 let $agent = LoopAgent::new(
                     provider,
-                    ctx.agent_config.clone(),
+                    agent_cfg,
                     &ctx.memory.sessions,
                     &ctx.memory.roles,
                     &ctx.memory.files,

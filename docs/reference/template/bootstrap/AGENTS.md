@@ -2,7 +2,7 @@
 
 ## Every Session
 
-1. Read `SOUL.md` — this is who you are.
+1. Read `SOUL.md` and `IDENTITY.md` — this is who you are.
 2. Read `USER.md` — this is who you're helping.
 3. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context.
 4. If in MAIN SESSION (direct chat with your human): Also read

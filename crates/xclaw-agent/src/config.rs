@@ -25,6 +25,10 @@ pub struct AgentConfig {
     /// Optional max_tokens override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Enable debug output (print assembled prompt to stderr).
+    /// Skipped from serde — this is a CLI-only runtime flag, never persisted.
+    #[serde(skip)]
+    pub debug: bool,
 }
 
 fn default_max_tool_rounds() -> u32 {
@@ -44,6 +48,7 @@ impl AgentConfig {
             transcript_tail_size: default_transcript_tail(),
             temperature: None,
             max_tokens: None,
+            debug: false,
         }
     }
 
@@ -75,6 +80,14 @@ impl AgentConfig {
     pub fn with_max_tokens(self, n: u32) -> Self {
         Self {
             max_tokens: Some(n),
+            ..self
+        }
+    }
+
+    /// Builder-style setter for debug mode.
+    pub fn with_debug(self, enabled: bool) -> Self {
+        Self {
+            debug: enabled,
             ..self
         }
     }
@@ -206,5 +219,45 @@ mod tests {
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(!json.contains("temperature"));
         assert!(!json.contains("max_tokens"));
+    }
+
+    // ── debug field ─────────────────────────────────────────────────────
+
+    #[test]
+    fn debug_defaults_to_false() {
+        let cfg = AgentConfig::new("gpt-4o");
+        assert!(!cfg.debug);
+    }
+
+    #[test]
+    fn with_debug_sets_flag() {
+        let cfg = AgentConfig::new("gpt-4o").with_debug(true);
+        assert!(cfg.debug);
+    }
+
+    #[test]
+    fn with_debug_chains_with_other_builders() {
+        let cfg = AgentConfig::new("gpt-4o")
+            .with_debug(true)
+            .with_temperature(0.5);
+        assert!(cfg.debug);
+        assert_eq!(cfg.temperature, Some(0.5));
+    }
+
+    #[test]
+    fn serde_debug_defaults_to_false_when_missing() {
+        let json = r#"{"model":"gpt-4o"}"#;
+        let cfg: AgentConfig = serde_json::from_str(json).unwrap();
+        assert!(!cfg.debug);
+    }
+
+    #[test]
+    fn serde_skips_debug_field() {
+        let cfg = AgentConfig::new("gpt-4o").with_debug(true);
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(!json.contains("debug"));
+        // Deserialized config always has debug=false (skipped field)
+        let back: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert!(!back.debug);
     }
 }
