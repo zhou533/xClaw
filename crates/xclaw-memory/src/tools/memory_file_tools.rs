@@ -104,7 +104,7 @@ impl Tool for MemoryFileDeleteTool {
     }
 
     fn description(&self) -> &str {
-        "Delete a memory file (MEMORY.md, SOUL.md, AGENTS.md, etc.) for a role"
+        "Delete a memory file (BOOTSTRAP.md, etc.) for a role"
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
