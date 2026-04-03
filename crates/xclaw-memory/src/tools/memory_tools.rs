@@ -30,15 +30,15 @@ impl Tool for MemoryDailyAppendTool {
     }
 
     fn description(&self) -> &str {
-        "Append an entry to today's daily memory"
+        "Append a Markdown entry to today's daily memory file. Each day has a separate file under the role's memory directory. The entry is appended to the end of the file."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "role": { "type": "string", "description": "Role name (default: 'default')" },
-                "entry": { "type": "string", "description": "Memory entry to append" }
+                "role": { "type": "string", "description": "Role identifier in snake_case (default: 'default')" },
+                "entry": { "type": "string", "description": "Markdown text to append to today's daily memory" }
             },
             "required": ["entry"]
         })
@@ -85,15 +85,15 @@ impl Tool for MemoryDailyReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read daily memory for a specific date"
+        "Read the full content of a daily memory file for a given date (YYYY-MM-DD). Returns the entire day's entries as Markdown text, or an empty string if no entries exist for that date."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "role": { "type": "string", "description": "Role name (default: 'default')" },
-                "date": { "type": "string", "description": "Date in YYYY-MM-DD format" }
+                "role": { "type": "string", "description": "Role identifier in snake_case (default: 'default')" },
+                "date": { "type": "string", "description": "Date in YYYY-MM-DD format (e.g. 2026-04-03)" }
             },
             "required": ["date"]
         })

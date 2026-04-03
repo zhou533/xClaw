@@ -43,18 +43,18 @@ impl Tool for MemoryFileReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read a memory file (MEMORY.md, SOUL.md, AGENTS.md, etc.) for a role"
+        "Read a role's memory file by kind. Supported files: AGENTS.md (collaboration rules), SOUL.md (AI persona), TOOLS.md (tool guidance), IDENTITY.md (self-identity), USER.md (user preferences), HEARTBEAT.md (action reference), BOOTSTRAP.md (workspace bootstrap), MEMORY.md (long-term knowledge). Returns the file content or a message if it does not exist."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "role": { "type": "string", "description": "Role name (default: 'default')" },
+                "role": { "type": "string", "description": "Role identifier in snake_case (default: 'default')" },
                 "kind": {
                     "type": "string",
                     "enum": ["agents", "soul", "tools", "identity", "user", "heartbeat", "bootstrap", "long_term"],
-                    "description": "Memory file kind"
+                    "description": "Memory file kind: agents=collaboration rules, soul=AI persona, tools=tool guidance, identity=self-identity, user=user preferences, heartbeat=action reference, bootstrap=workspace bootstrap, long_term=distilled knowledge (MEMORY.md)"
                 }
             },
             "required": ["kind"]
@@ -104,18 +104,18 @@ impl Tool for MemoryFileDeleteTool {
     }
 
     fn description(&self) -> &str {
-        "Delete a memory file (BOOTSTRAP.md, etc.) for a role"
+        "Delete a role's memory file by kind. Primarily used to remove BOOTSTRAP.md after workspace bootstrap is complete. Other memory file kinds can also be deleted."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "role": { "type": "string", "description": "Role name (default: 'default')" },
+                "role": { "type": "string", "description": "Role identifier in snake_case (default: 'default')" },
                 "kind": {
                     "type": "string",
                     "enum": ["agents", "soul", "tools", "identity", "user", "heartbeat", "bootstrap", "long_term"],
-                    "description": "Memory file kind"
+                    "description": "Memory file kind: agents=collaboration rules, soul=AI persona, tools=tool guidance, identity=self-identity, user=user preferences, heartbeat=action reference, bootstrap=workspace bootstrap, long_term=distilled knowledge (MEMORY.md)"
                 }
             },
             "required": ["kind"]
@@ -173,20 +173,20 @@ impl Tool for MemoryFileWriteTool {
     }
 
     fn description(&self) -> &str {
-        "Write a memory file (MEMORY.md, SOUL.md, AGENTS.md, etc.) for a role"
+        "Write (overwrite) a role's memory file by kind. The entire file content is replaced. Creates the file if it does not exist. Supported kinds: agents, soul, tools, identity, user, heartbeat, bootstrap, long_term."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "role": { "type": "string", "description": "Role name (default: 'default')" },
+                "role": { "type": "string", "description": "Role identifier in snake_case (default: 'default')" },
                 "kind": {
                     "type": "string",
                     "enum": ["agents", "soul", "tools", "identity", "user", "heartbeat", "bootstrap", "long_term"],
-                    "description": "Memory file kind"
+                    "description": "Memory file kind: agents=collaboration rules, soul=AI persona, tools=tool guidance, identity=self-identity, user=user preferences, heartbeat=action reference, bootstrap=workspace bootstrap, long_term=distilled knowledge (MEMORY.md)"
                 },
-                "content": { "type": "string", "description": "File content to write" }
+                "content": { "type": "string", "description": "Markdown content to write. Replaces the entire file." }
             },
             "required": ["kind", "content"]
         })

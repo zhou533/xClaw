@@ -32,14 +32,14 @@ impl Tool for RoleCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a new role with configuration (name, description, system_prompt, tools)"
+        "Create a new role with its configuration and initialize its memory directory with bootstrap templates. Role name must be snake_case."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "name": { "type": "string", "description": "Role name (snake_case)" },
+                "name": { "type": "string", "description": "Role identifier in snake_case" },
                 "description": {
                     "type": "array",
                     "items": { "type": "string" },
@@ -124,7 +124,7 @@ impl Tool for RoleListTool {
     }
 
     fn description(&self) -> &str {
-        "List all available roles"
+        "List all available roles. Returns a JSON array of role names."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -167,14 +167,14 @@ impl Tool for RoleGetTool {
     }
 
     fn description(&self) -> &str {
-        "Get configuration details of a specific role"
+        "Get the full configuration of a specific role. Returns YAML with name, description, system_prompt, tools, and memory_dir fields."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "name": { "type": "string", "description": "Role name" }
+                "name": { "type": "string", "description": "Role identifier in snake_case" }
             },
             "required": ["name"]
         })
@@ -220,14 +220,14 @@ impl Tool for RoleDeleteTool {
     }
 
     fn description(&self) -> &str {
-        "Delete a role (cannot delete 'default')"
+        "Delete a role and all its memory files. The 'default' role cannot be deleted."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "name": { "type": "string", "description": "Role name to delete" }
+                "name": { "type": "string", "description": "Role identifier in snake_case" }
             },
             "required": ["name"]
         })
