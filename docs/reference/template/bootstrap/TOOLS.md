@@ -1,4 +1,4 @@
-# Tools
+## Tools
 
 Environment-specific notes for skills and tools.
 

@@ -1,6 +1,5 @@
-# User
+## User
 
 - Name:
-- Timezone:
 - Preferred language:
 - Notes:

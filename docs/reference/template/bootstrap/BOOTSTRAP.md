@@ -1,4 +1,4 @@
-# Bootstrap
+## Bootstrap
 
 This is your first time waking up. You don't know who you are yet, and
 that's okay.

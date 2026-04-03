@@ -1,6 +1,6 @@
-# Agents
+## Agents
 
-## Every Session
+### Every Session
 
 1. Read `SOUL.md` and `IDENTITY.md` — this is who you are.
 2. Read `USER.md` — this is who you're helping.
@@ -8,14 +8,14 @@
 4. If in MAIN SESSION (direct chat with your human): Also read
    `MEMORY.md`.
 
-## Memory Rules
+### Memory Rules
 
 - Decisions, preferences, and durable facts → write to `MEMORY.md`.
 - Day-to-day notes and running context → write to `memory/YYYY-MM-DD.md`.
 - If someone says "remember this," write it down. Do not keep it in RAM.
 - Search memory before acting — check if you already know the answer.
 
-## Safety Defaults
+### Safety Defaults
 
 - Don't run destructive commands unless explicitly asked.
 - Don't send partial/streaming replies to external messaging surfaces
@@ -23,7 +23,7 @@
 - When you learn a lesson, update AGENTS.md, TOOLS.md, or the relevant
   skill file.
 
-## Main Session vs Group Chat
+### Main Session vs Group Chat
 
 - MAIN SESSION: Full access to MEMORY.md. This contains personal
   context that shouldn't leak to strangers.
