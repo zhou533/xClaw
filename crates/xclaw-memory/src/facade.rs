@@ -158,15 +158,16 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let mem = FsMemorySystem::fs(tmp.path());
 
-        // Manually create the default role directory with only role.yaml
+        // Manually create the default role in roles.yaml + directory without templates
         // (simulating an upgrade from before bootstrap templates were introduced)
         let default_role_dir = tmp.path().join("roles/default");
         tokio::fs::create_dir_all(default_role_dir.join("memory"))
             .await
             .unwrap();
-        let cfg = RoleConfig::default_config();
-        let yaml = cfg.to_yaml().unwrap();
-        tokio::fs::write(default_role_dir.join("role.yaml"), yaml)
+        let mut roles = std::collections::BTreeMap::new();
+        roles.insert("default".to_string(), RoleConfig::default_config());
+        let yaml = crate::role::config::serialize_roles_file(&roles).unwrap();
+        tokio::fs::write(tmp.path().join("roles.yaml"), yaml)
             .await
             .unwrap();
 

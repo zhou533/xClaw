@@ -18,6 +18,7 @@ fn test_config(name: &str) -> RoleConfig {
         system_prompt: format!("You are {name}"),
         tools: vec!["shell".to_string()],
         meta: Default::default(),
+        memory_dir: format!("roles/{name}"),
     }
 }
 
@@ -29,10 +30,10 @@ async fn full_lifecycle_create_get_list_delete() {
     mgr.create_role(test_config("alpha")).await.unwrap();
     mgr.create_role(test_config("beta")).await.unwrap();
 
-    // Verify directories exist
-    assert!(tmp.path().join("roles/alpha/role.yaml").exists());
+    // Verify roles.yaml and directories exist
+    assert!(tmp.path().join("roles.yaml").exists());
     assert!(tmp.path().join("roles/alpha/memory").is_dir());
-    assert!(tmp.path().join("roles/beta/role.yaml").exists());
+    assert!(tmp.path().join("roles/beta/memory").is_dir());
 
     // Get
     let alpha = mgr.get_role(&RoleId::new("alpha").unwrap()).await.unwrap();
@@ -45,11 +46,11 @@ async fn full_lifecycle_create_get_list_delete() {
     let names: Vec<&str> = roles.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, vec!["alpha", "beta"]);
 
-    // Delete
+    // Delete (directory preserved, entry removed from roles.yaml)
     mgr.delete_role(&RoleId::new("alpha").unwrap())
         .await
         .unwrap();
-    assert!(!tmp.path().join("roles/alpha").exists());
+    assert!(tmp.path().join("roles/alpha").is_dir()); // directory preserved
 
     // List after delete
     let roles = mgr.list_roles().await.unwrap();

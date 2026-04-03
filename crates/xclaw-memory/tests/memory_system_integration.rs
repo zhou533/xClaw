@@ -27,7 +27,7 @@ fn make_ctx(tmp: &tempfile::TempDir) -> ToolContext {
 async fn ensure_default_creates_role_directory() {
     let (tmp, mem) = setup();
     mem.ensure_default_role().await.unwrap();
-    assert!(tmp.path().join("roles/default/role.yaml").exists());
+    assert!(tmp.path().join("roles.yaml").exists());
     assert!(tmp.path().join("roles/default/memory").is_dir());
 }
 
@@ -128,7 +128,7 @@ async fn tool_role_create_creates_directory() {
         .unwrap();
 
     assert!(!result.is_error);
-    assert!(tmp.path().join("roles/coder/role.yaml").exists());
+    assert!(tmp.path().join("roles.yaml").exists());
     assert!(tmp.path().join("roles/coder/memory").is_dir());
 }
 

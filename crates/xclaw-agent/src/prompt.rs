@@ -267,6 +267,7 @@ mod tests {
             system_prompt: "You are a secretary.".into(),
             tools: vec![],
             meta: RoleMeta::default(),
+            memory_dir: String::new(),
         };
         let snapshot = MemorySnapshot {
             files: HashMap::new(),
@@ -298,6 +299,7 @@ mod tests {
             system_prompt: "You are a secretary.".into(),
             tools: vec![],
             meta: RoleMeta::default(),
+            memory_dir: String::new(),
         };
         let mut files = HashMap::new();
         files.insert(
@@ -320,6 +322,7 @@ mod tests {
             system_prompt: "You are a secretary.".into(),
             tools: vec![],
             meta: RoleMeta::default(),
+            memory_dir: String::new(),
         };
         let mut files = HashMap::new();
         files.insert(MemoryFileKind::Bootstrap, Some("   ".to_string()));
@@ -338,6 +341,7 @@ mod tests {
             system_prompt: "You are a secretary.".into(),
             tools: vec![],
             meta: RoleMeta::default(),
+            memory_dir: String::new(),
         };
         let mut files = HashMap::new();
         files.insert(MemoryFileKind::Bootstrap, None);
@@ -402,6 +406,7 @@ mod tests {
             system_prompt: "You are a coder.".into(),
             tools: vec![],
             meta: RoleMeta::default(),
+            memory_dir: String::new(),
         };
         let mut files = HashMap::new();
         files.insert(MemoryFileKind::Soul, Some("creative".to_string()));

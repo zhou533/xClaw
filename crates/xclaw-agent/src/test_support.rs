@@ -158,6 +158,7 @@ impl RoleManager for StubRoleManager {
             system_prompt: "You are xClaw test agent.".into(),
             tools: vec![],
             meta: RoleMeta::default(),
+            memory_dir: "roles/default".into(),
         })
     }
 

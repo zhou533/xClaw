@@ -1,10 +1,16 @@
 //! Role configuration (AIOS-compatible).
 //!
-//! Each role has a `role.yaml` file containing its config.
+//! All roles are stored in a single `roles.yaml` file as a YAML map,
+//! keyed by `role_id`.
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::MemoryError;
+
+/// All roles in a single file: `role_id` → `RoleConfig`.
+pub type RolesFile = BTreeMap<String, RoleConfig>;
 
 /// AIOS-compatible role configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +24,9 @@ pub struct RoleConfig {
     pub tools: Vec<String>,
     #[serde(default)]
     pub meta: RoleMeta,
+    /// Directory for this role's memory files (relative to base_dir).
+    #[serde(default)]
+    pub memory_dir: String,
 }
 
 /// Role metadata.
@@ -65,6 +74,7 @@ impl RoleConfig {
             system_prompt: String::new(),
             tools: vec![],
             meta: RoleMeta::default(),
+            memory_dir: "roles/default".to_string(),
         }
     }
 
@@ -77,6 +87,16 @@ impl RoleConfig {
     pub fn to_yaml(&self) -> Result<String, MemoryError> {
         serde_yml::to_string(self).map_err(|e| MemoryError::YamlParse(e.to_string()))
     }
+}
+
+/// Parse a `RolesFile` from YAML content.
+pub fn parse_roles_file(content: &str) -> Result<RolesFile, MemoryError> {
+    serde_yml::from_str(content).map_err(|e| MemoryError::YamlParse(e.to_string()))
+}
+
+/// Serialize a `RolesFile` to YAML.
+pub fn serialize_roles_file(roles: &RolesFile) -> Result<String, MemoryError> {
+    serde_yml::to_string(roles).map_err(|e| MemoryError::YamlParse(e.to_string()))
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -94,6 +114,7 @@ mod tests {
         assert!(cfg.tools.is_empty());
         assert_eq!(cfg.meta.author, "user");
         assert_eq!(cfg.meta.version, "1.0.0");
+        assert_eq!(cfg.memory_dir, "roles/default");
     }
 
     #[test]
@@ -109,6 +130,7 @@ mod tests {
                 license: "private".to_string(),
                 created_at: Some("2026-03-25".to_string()),
             },
+            memory_dir: "roles/secretary".to_string(),
         };
         let yaml = cfg.to_yaml().unwrap();
         let parsed = RoleConfig::from_yaml(&yaml).unwrap();
@@ -116,6 +138,7 @@ mod tests {
         assert_eq!(parsed.description.len(), 2);
         assert_eq!(parsed.tools, vec!["shell", "file_read"]);
         assert_eq!(parsed.meta.created_at.as_deref(), Some("2026-03-25"));
+        assert_eq!(parsed.memory_dir, "roles/secretary");
     }
 
     #[test]
@@ -155,8 +178,67 @@ meta:
     }
 
     #[test]
+    fn minimal_yaml_defaults_memory_dir_to_empty() {
+        let yaml = "name: test\n";
+        let cfg = RoleConfig::from_yaml(yaml).unwrap();
+        assert!(cfg.memory_dir.is_empty());
+    }
+
+    #[test]
     fn invalid_yaml_returns_error() {
         let result = RoleConfig::from_yaml("{{{{invalid}}}}");
         assert!(result.is_err());
+    }
+
+    // ── RolesFile tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn roles_file_roundtrip() {
+        use std::collections::BTreeMap;
+
+        let mut roles = BTreeMap::new();
+        roles.insert(
+            "default".to_string(),
+            RoleConfig {
+                name: "default".to_string(),
+                memory_dir: "roles/default".to_string(),
+                ..RoleConfig::default_config()
+            },
+        );
+
+        let yaml = serialize_roles_file(&roles).unwrap();
+        let parsed = parse_roles_file(&yaml).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed["default"].name, "default");
+        assert_eq!(parsed["default"].memory_dir, "roles/default");
+    }
+
+    #[test]
+    fn roles_file_with_multiple_entries() {
+        use std::collections::BTreeMap;
+
+        let mut roles = BTreeMap::new();
+        roles.insert(
+            "admin".to_string(),
+            RoleConfig {
+                name: "admin".to_string(),
+                memory_dir: "roles/admin".to_string(),
+                ..RoleConfig::default_config()
+            },
+        );
+        roles.insert(
+            "secretary".to_string(),
+            RoleConfig {
+                name: "secretary".to_string(),
+                memory_dir: "roles/secretary".to_string(),
+                ..RoleConfig::default_config()
+            },
+        );
+
+        let yaml = serialize_roles_file(&roles).unwrap();
+        let parsed = parse_roles_file(&yaml).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed.contains_key("admin"));
+        assert!(parsed.contains_key("secretary"));
     }
 }

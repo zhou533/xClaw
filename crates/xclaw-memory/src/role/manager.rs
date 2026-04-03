@@ -1,11 +1,14 @@
 //! Role lifecycle management.
+//!
+//! All role configs are stored in a single `{base_dir}/roles.yaml` file.
+//! Role memory directories remain at `{base_dir}/roles/{name}/`.
 
 use std::path::PathBuf;
 
 use xclaw_core::types::RoleId;
 
 use crate::error::MemoryError;
-use crate::role::config::RoleConfig;
+use crate::role::config::{RoleConfig, RolesFile, parse_roles_file, serialize_roles_file};
 use crate::workspace::templates::ensure_bootstrap_templates;
 
 /// Role lifecycle manager.
@@ -35,7 +38,8 @@ pub trait RoleManager: Send + Sync {
 
 /// Filesystem-backed role manager.
 ///
-/// Manages `{base_dir}/roles/{name}/` directories.
+/// Stores all role configs in `{base_dir}/roles.yaml`.
+/// Role memory directories live at `{base_dir}/roles/{name}/`.
 pub struct FsRoleManager {
     base_dir: PathBuf,
 }
@@ -51,8 +55,29 @@ impl FsRoleManager {
         self.base_dir.join("roles")
     }
 
-    fn role_yaml_path(&self, role: &RoleId) -> PathBuf {
-        self.role_dir(role).join("role.yaml")
+    fn roles_yaml_path(&self) -> PathBuf {
+        self.base_dir.join("roles.yaml")
+    }
+
+    async fn load_roles_file(&self) -> Result<RolesFile, MemoryError> {
+        let path = self.roles_yaml_path();
+        match tokio::fs::read_to_string(&path).await {
+            Ok(content) => parse_roles_file(&content),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(RolesFile::new()),
+            Err(e) => Err(MemoryError::Io(e)),
+        }
+    }
+
+    async fn save_roles_file(&self, roles: &RolesFile) -> Result<(), MemoryError> {
+        let path = self.roles_yaml_path();
+        let yaml = serialize_roles_file(roles)?;
+
+        // Atomic write: unique temp file then rename
+        let parent = path.parent().unwrap_or(std::path::Path::new("."));
+        let tmp = tempfile::NamedTempFile::new_in(parent).map_err(MemoryError::Io)?;
+        tokio::fs::write(tmp.path(), &yaml).await?;
+        tmp.persist(&path).map_err(|e| MemoryError::Io(e.error))?;
+        Ok(())
     }
 }
 
@@ -61,21 +86,29 @@ impl RoleManager for FsRoleManager {
         self.roles_dir().join(role.as_str())
     }
 
-    async fn create_role(&self, config: RoleConfig) -> Result<(), MemoryError> {
+    async fn create_role(&self, mut config: RoleConfig) -> Result<(), MemoryError> {
         let role_id = RoleId::new(&config.name)
             .map_err(|_| MemoryError::InvalidRoleId(config.name.clone()))?;
-        let role_dir = self.role_dir(&role_id);
 
-        if role_dir.exists() {
+        let mut roles = self.load_roles_file().await?;
+
+        if roles.contains_key(role_id.as_str()) {
             return Err(MemoryError::RoleAlreadyExists(config.name.clone()));
         }
+
+        // Set memory_dir default if empty
+        if config.memory_dir.is_empty() {
+            config.memory_dir = format!("roles/{}", role_id.as_str());
+        }
+
+        let role_dir = self.role_dir(&role_id);
 
         // Create role directory and memory subdirectory
         tokio::fs::create_dir_all(role_dir.join("memory")).await?;
 
-        // Write role.yaml
-        let yaml = config.to_yaml()?;
-        tokio::fs::write(self.role_yaml_path(&role_id), yaml).await?;
+        // Insert into roles map and persist
+        roles.insert(role_id.as_str().to_string(), config.clone());
+        self.save_roles_file(&roles).await?;
 
         // Seed bootstrap template files (idempotent; failures are only warnings)
         ensure_bootstrap_templates(&role_dir).await;
@@ -85,41 +118,17 @@ impl RoleManager for FsRoleManager {
     }
 
     async fn get_role(&self, role: &RoleId) -> Result<RoleConfig, MemoryError> {
-        let yaml_path = self.role_yaml_path(role);
-        if !yaml_path.exists() {
-            return Err(MemoryError::RoleNotFound(role.to_string()));
-        }
-        let content = tokio::fs::read_to_string(&yaml_path).await?;
-        RoleConfig::from_yaml(&content)
+        let roles = self.load_roles_file().await?;
+        roles
+            .get(role.as_str())
+            .cloned()
+            .ok_or_else(|| MemoryError::RoleNotFound(role.to_string()))
     }
 
     async fn list_roles(&self) -> Result<Vec<RoleConfig>, MemoryError> {
-        let roles_dir = self.roles_dir();
-        if !roles_dir.exists() {
-            return Ok(vec![]);
-        }
-
-        let mut configs = Vec::new();
-        let mut entries = tokio::fs::read_dir(&roles_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            if !entry.file_type().await?.is_dir() {
-                continue;
-            }
-            let yaml_path = entry.path().join("role.yaml");
-            if yaml_path.exists() {
-                let content = tokio::fs::read_to_string(&yaml_path).await?;
-                match RoleConfig::from_yaml(&content) {
-                    Ok(cfg) => configs.push(cfg),
-                    Err(e) => tracing::warn!(
-                        path = %yaml_path.display(),
-                        error = %e,
-                        "skipping role with unparseable role.yaml"
-                    ),
-                }
-            }
-        }
-        configs.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(configs)
+        let roles = self.load_roles_file().await?;
+        // BTreeMap is already sorted by key
+        Ok(roles.into_values().collect())
     }
 
     async fn delete_role(&self, role: &RoleId) -> Result<(), MemoryError> {
@@ -129,23 +138,16 @@ impl RoleManager for FsRoleManager {
             ));
         }
 
-        let role_dir = self.role_dir(role);
-        if !role_dir.exists() {
+        let mut roles = self.load_roles_file().await?;
+
+        if roles.remove(role.as_str()).is_none() {
             return Err(MemoryError::RoleNotFound(role.to_string()));
         }
 
-        // Safety: verify the path is actually inside our roles directory
-        let canonical = tokio::fs::canonicalize(&role_dir).await?;
-        let roles_canonical = tokio::fs::canonicalize(self.roles_dir()).await?;
-        if !canonical.starts_with(&roles_canonical) {
-            return Err(MemoryError::InvalidRoleId(format!(
-                "path escape detected: {}",
-                role.as_str()
-            )));
-        }
+        self.save_roles_file(&roles).await?;
 
-        tokio::fs::remove_dir_all(&role_dir).await?;
-        tracing::info!(role = role.as_str(), "deleted role");
+        // Directory is intentionally preserved (memory files, daily memory, etc.)
+        tracing::info!(role = role.as_str(), "deleted role from roles.yaml");
         Ok(())
     }
 }
@@ -171,6 +173,7 @@ mod tests {
             system_prompt: "hello".to_string(),
             tools: vec!["shell".to_string()],
             meta: Default::default(),
+            memory_dir: "roles/secretary".to_string(),
         };
         mgr.create_role(config).await.unwrap();
 
@@ -180,7 +183,10 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.name, "secretary");
         assert_eq!(loaded.tools, vec!["shell"]);
+        assert_eq!(loaded.memory_dir, "roles/secretary");
 
+        // roles.yaml should exist at base_dir level
+        assert!(tmp.path().join("roles.yaml").exists());
         // memory/ subdirectory should exist
         assert!(tmp.path().join("roles/secretary/memory").is_dir());
     }
@@ -215,6 +221,7 @@ mod tests {
         for name in ["coder", "admin", "secretary"] {
             let config = RoleConfig {
                 name: name.to_string(),
+                memory_dir: format!("roles/{name}"),
                 ..RoleConfig::default_config()
             };
             mgr.create_role(config).await.unwrap();
@@ -234,12 +241,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_role_removes_directory() {
+    async fn delete_role_preserves_directory() {
         let tmp = tempfile::TempDir::new().unwrap();
         let mgr = test_manager(tmp.path());
 
         let config = RoleConfig {
             name: "temp".to_string(),
+            memory_dir: "roles/temp".to_string(),
             ..RoleConfig::default_config()
         };
         mgr.create_role(config).await.unwrap();
@@ -248,7 +256,13 @@ mod tests {
         mgr.delete_role(&RoleId::new("temp").unwrap())
             .await
             .unwrap();
-        assert!(!tmp.path().join("roles/temp").exists());
+
+        // Role removed from roles.yaml
+        let result = mgr.get_role(&RoleId::new("temp").unwrap()).await;
+        assert!(matches!(result, Err(MemoryError::RoleNotFound(_))));
+
+        // But directory is preserved
+        assert!(tmp.path().join("roles/temp").is_dir());
     }
 
     #[tokio::test]
@@ -256,7 +270,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let mgr = test_manager(tmp.path());
 
-        // Create default so directory exists
         mgr.create_role(RoleConfig::default_config()).await.unwrap();
 
         let result = mgr.delete_role(&RoleId::default()).await;
@@ -283,6 +296,46 @@ mod tests {
         assert!(matches!(result, Err(MemoryError::InvalidRoleId(_))));
     }
 
+    #[tokio::test]
+    async fn roles_yaml_persists_multiple_roles() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mgr = test_manager(tmp.path());
+
+        mgr.create_role(RoleConfig::default_config()).await.unwrap();
+        mgr.create_role(RoleConfig {
+            name: "coder".to_string(),
+            memory_dir: "roles/coder".to_string(),
+            ..RoleConfig::default_config()
+        })
+        .await
+        .unwrap();
+
+        // Read roles.yaml directly and verify both entries
+        let content = tokio::fs::read_to_string(tmp.path().join("roles.yaml"))
+            .await
+            .unwrap();
+        let roles: crate::role::config::RolesFile = serde_yml::from_str(&content).unwrap();
+        assert_eq!(roles.len(), 2);
+        assert!(roles.contains_key("default"));
+        assert!(roles.contains_key("coder"));
+    }
+
+    #[tokio::test]
+    async fn create_role_sets_memory_dir_default() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mgr = test_manager(tmp.path());
+
+        let config = RoleConfig {
+            name: "writer".to_string(),
+            memory_dir: String::new(), // empty — should be set by create_role
+            ..RoleConfig::default_config()
+        };
+        mgr.create_role(config).await.unwrap();
+
+        let loaded = mgr.get_role(&RoleId::new("writer").unwrap()).await.unwrap();
+        assert_eq!(loaded.memory_dir, "roles/writer");
+    }
+
     // ── Bootstrap template seeding ────────────────────────────────────────────
 
     #[tokio::test]
@@ -295,13 +348,13 @@ mod tests {
 
         let config = RoleConfig {
             name: "writer".to_string(),
+            memory_dir: "roles/writer".to_string(),
             ..RoleConfig::default_config()
         };
         mgr.create_role(config).await.unwrap();
 
         let role_dir = tmp.path().join("roles/writer");
 
-        // All 7 kinds with templates must exist
         for kind in MemoryFileKind::all() {
             if bootstrap_template(*kind).is_none() {
                 continue;
@@ -322,6 +375,7 @@ mod tests {
 
         let config = RoleConfig {
             name: "checker".to_string(),
+            memory_dir: "roles/checker".to_string(),
             ..RoleConfig::default_config()
         };
         mgr.create_role(config).await.unwrap();

@@ -52,6 +52,8 @@ crates/
   xclaw-provider/ — LlmProvider trait + OpenAI/Claude/MiniMax implementations
   xclaw-tools/    — Tool trait (dyn-safe via async_trait) + ToolRegistry + built-in tools (file_read/write/edit)
   xclaw-memory/   — Role management (RoleConfig, RoleManager) + MemoryStore + LongTermMemory + DailyMemory + WorkspaceMemory
+                    All role configs stored in a single `roles.yaml` (YAML map keyed by role_id).
+                    Role memory directories remain at `roles/{name}/`.
   xclaw-skill/    — Skill trait + loader/registry/executor (WASM sandbox planned)
   xclaw-channel/  — Channel adapters (Telegram, Discord, Slack, Webchat — stubs)
   xclaw-gateway/  — Axum HTTP/WS server modules

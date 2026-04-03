@@ -91,6 +91,7 @@ impl Tool for RoleCreateTool {
                 })
                 .unwrap_or_default(),
             meta: Default::default(),
+            memory_dir: format!("roles/{name}"),
         };
 
         let mgr = FsRoleManager::new(&self.base_dir);
