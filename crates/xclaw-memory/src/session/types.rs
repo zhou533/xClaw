@@ -251,6 +251,37 @@ pub struct SessionSummary {
     pub last_message_at: Option<String>,
 }
 
+// ─── ContentBlockKind ────────────────────────────────────────────────────────
+
+/// Discriminant-only mirror of `ContentBlock` variants.
+///
+/// Enables filtering content blocks by type without pattern-matching on data,
+/// and supports composable multi-select filters via `BTreeSet<ContentBlockKind>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum ContentBlockKind {
+    Text,
+    Thinking,
+    ToolCall,
+    ToolResult,
+    Image,
+    Unknown,
+}
+
+impl ContentBlock {
+    /// Return the `ContentBlockKind` discriminant for this block.
+    pub fn kind(&self) -> ContentBlockKind {
+        match self {
+            ContentBlock::Text { .. } => ContentBlockKind::Text,
+            ContentBlock::Thinking { .. } => ContentBlockKind::Thinking,
+            ContentBlock::ToolCall { .. } => ContentBlockKind::ToolCall,
+            ContentBlock::ToolResult { .. } => ContentBlockKind::ToolResult,
+            ContentBlock::Image { .. } => ContentBlockKind::Image,
+            ContentBlock::Unknown { .. } => ContentBlockKind::Unknown,
+        }
+    }
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -630,6 +661,88 @@ mod tests {
         };
         assert!(!rec.has_tool_calls());
         assert!(rec.tool_calls().is_empty());
+    }
+
+    // ── ContentBlockKind ────────────────────────────────────────────────
+
+    #[test]
+    fn kind_text() {
+        let block = ContentBlock::Text { text: "hi".into() };
+        assert_eq!(block.kind(), ContentBlockKind::Text);
+    }
+
+    #[test]
+    fn kind_thinking() {
+        let block = ContentBlock::Thinking {
+            text: "hmm".into(),
+            thinking_id: None,
+        };
+        assert_eq!(block.kind(), ContentBlockKind::Thinking);
+    }
+
+    #[test]
+    fn kind_tool_call() {
+        let block = ContentBlock::ToolCall {
+            call_id: "c1".into(),
+            name: "echo".into(),
+            arguments: "{}".into(),
+        };
+        assert_eq!(block.kind(), ContentBlockKind::ToolCall);
+    }
+
+    #[test]
+    fn kind_tool_result() {
+        let block = ContentBlock::ToolResult {
+            call_id: "c1".into(),
+            name: None,
+            content: "ok".into(),
+            is_error: false,
+        };
+        assert_eq!(block.kind(), ContentBlockKind::ToolResult);
+    }
+
+    #[test]
+    fn kind_image() {
+        let block = ContentBlock::Image {
+            media_type: "image/png".into(),
+            source: ImageSource::Base64 { data: "abc".into() },
+        };
+        assert_eq!(block.kind(), ContentBlockKind::Image);
+    }
+
+    #[test]
+    fn kind_unknown() {
+        let block = ContentBlock::Unknown {
+            original_type: "audio".into(),
+            data: "{}".into(),
+        };
+        assert_eq!(block.kind(), ContentBlockKind::Unknown);
+    }
+
+    #[test]
+    fn content_block_kind_supports_btreeset() {
+        use std::collections::BTreeSet;
+        let kinds: BTreeSet<ContentBlockKind> =
+            [ContentBlockKind::Text, ContentBlockKind::ToolCall]
+                .into_iter()
+                .collect();
+        assert!(kinds.contains(&ContentBlockKind::Text));
+        assert!(!kinds.contains(&ContentBlockKind::Thinking));
+    }
+
+    #[test]
+    fn content_block_kind_is_ordered_deterministically() {
+        // Verify Ord is deterministic — same input always produces same sort order
+        let input = vec![
+            ContentBlockKind::Unknown,
+            ContentBlockKind::Text,
+            ContentBlockKind::ToolCall,
+        ];
+        let mut a = input.clone();
+        let mut b = input;
+        a.sort();
+        b.sort();
+        assert_eq!(a, b);
     }
 
     // ── SessionSummary ──────────────────────────────────────────────────

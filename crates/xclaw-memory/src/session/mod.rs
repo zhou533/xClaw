@@ -13,6 +13,6 @@ pub use policy::SessionPolicy;
 pub use record_id::{RecordId, generate_record_id};
 pub use store::SessionStore;
 pub use types::{
-    ContentBlock, ImageSource, SessionEntry, SessionIndex, SessionSummary, StopReason, TokenUsage,
-    TranscriptRecord, TranscriptRole,
+    ContentBlock, ContentBlockKind, ImageSource, SessionEntry, SessionIndex, SessionSummary,
+    StopReason, TokenUsage, TranscriptRecord, TranscriptRole,
 };
