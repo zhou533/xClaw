@@ -3,6 +3,7 @@ pub mod security;
 pub mod traits;
 
 pub mod browser;
+pub mod datetime;
 pub mod file;
 pub mod file_io;
 pub mod registry;
@@ -22,4 +23,5 @@ pub use traits::{Tool, ToolContext, ToolOutput, ToolSchema, WorkspaceScope};
 /// Future: shell, browser, http, memory, cron tools.
 pub fn register_builtin_tools(registry: &mut ToolRegistry) {
     file::register_file_tools(registry);
+    datetime::register_datetime_tools(registry);
 }
