@@ -36,13 +36,21 @@ use crate::traits::UserInput;
 
 pub struct StubSessionStore {
     pub transcripts: Arc<Mutex<Vec<TranscriptRecord>>>,
+    pub seeded_history: Arc<Mutex<Vec<TranscriptRecord>>>,
 }
 
 impl StubSessionStore {
     pub fn new() -> Self {
         Self {
             transcripts: Arc::new(Mutex::new(Vec::new())),
+            seeded_history: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Seed transcript records that `load_transcript_tail` will return.
+    pub fn with_history(self, records: Vec<TranscriptRecord>) -> Self {
+        *self.seeded_history.lock().unwrap() = records;
+        self
     }
 
     pub fn transcript_count(&self) -> usize {
@@ -107,7 +115,7 @@ impl SessionStore for StubSessionStore {
         _session_id: &SessionId,
         _n: usize,
     ) -> Result<Vec<TranscriptRecord>, MemoryError> {
-        Ok(vec![])
+        Ok(self.seeded_history.lock().unwrap().clone())
     }
 
     async fn session_summary(
@@ -197,6 +205,15 @@ impl MemoryFileLoader for StubMemoryFileLoader {
         _kind: MemoryFileKind,
     ) -> Result<bool, MemoryError> {
         Ok(false)
+    }
+
+    async fn append_file(
+        &self,
+        _role: &RoleId,
+        _kind: MemoryFileKind,
+        _content: &str,
+    ) -> Result<(), MemoryError> {
+        Ok(())
     }
 
     async fn load_snapshot(&self, _role: &RoleId) -> Result<MemorySnapshot, MemoryError> {
@@ -332,6 +349,54 @@ impl LlmProvider for ToolThenTextProvider {
                 usage: None,
             })
         }
+    }
+
+    async fn chat_stream(&self, _req: &ChatRequest) -> Result<ChatStream, ProviderError> {
+        Ok(Box::pin(futures::stream::empty()))
+    }
+
+    async fn list_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
+        Ok(vec![])
+    }
+}
+
+/// Provider that captures the `ChatRequest` and returns a fixed text reply.
+pub struct CapturingProvider {
+    pub captured: Arc<Mutex<Vec<ChatRequest>>>,
+    reply: String,
+}
+
+impl CapturingProvider {
+    pub fn new(reply: &str) -> Self {
+        Self {
+            captured: Arc::new(Mutex::new(Vec::new())),
+            reply: reply.to_string(),
+        }
+    }
+}
+
+impl LlmProvider for CapturingProvider {
+    fn name(&self) -> &str {
+        "capturing-stub"
+    }
+
+    async fn chat(&self, req: &ChatRequest) -> Result<ChatResponse, ProviderError> {
+        self.captured.lock().unwrap().push(req.clone());
+        Ok(ChatResponse {
+            id: "resp-cap".into(),
+            model: "stub".into(),
+            choices: vec![Choice {
+                index: 0,
+                message: Message {
+                    role: Role::Assistant,
+                    content: Some(self.reply.clone()),
+                    tool_calls: vec![],
+                    tool_call_id: None,
+                },
+                finish_reason: Some(FinishReason::Stop),
+            }],
+            usage: None,
+        })
     }
 
     async fn chat_stream(&self, _req: &ChatRequest) -> Result<ChatStream, ProviderError> {

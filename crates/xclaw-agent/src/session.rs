@@ -72,7 +72,7 @@ pub(crate) fn transcript_to_messages(
 ) -> Vec<Message> {
     records
         .iter()
-        .map(|r| record_to_message(r, filter))
+        .filter_map(|r| record_to_message(r, filter))
         .collect()
 }
 
@@ -83,16 +83,19 @@ fn block_passes(block: &ContentBlock, filter: &BTreeSet<ContentBlockKind>) -> bo
     filter.is_empty() || filter.contains(&block.kind())
 }
 
-fn record_to_message(record: &TranscriptRecord, filter: &BTreeSet<ContentBlockKind>) -> Message {
+fn record_to_message(
+    record: &TranscriptRecord,
+    filter: &BTreeSet<ContentBlockKind>,
+) -> Option<Message> {
     match &record.role {
         TranscriptRole::User => {
             let text = filtered_text_content(&record.content, filter);
-            Message {
+            Some(Message {
                 role: Role::User,
                 content: Some(text),
                 tool_calls: vec![],
                 tool_call_id: None,
-            }
+            })
         }
         TranscriptRole::Assistant => {
             let text = filtered_text_content(&record.content, filter);
@@ -116,15 +119,21 @@ fn record_to_message(record: &TranscriptRecord, filter: &BTreeSet<ContentBlockKi
                 })
                 .collect();
 
-            Message {
+            // Drop assistant message if filtering left it with no content at all
+            if text.is_empty() && tool_calls.is_empty() {
+                return None;
+            }
+
+            Some(Message {
                 role: Role::Assistant,
                 content: if text.is_empty() { None } else { Some(text) },
                 tool_calls,
                 tool_call_id: None,
-            }
+            })
         }
         TranscriptRole::Tool => {
-            // Extract call_id and content from the first ToolResult block that passes filter
+            // Extract call_id and content from the first ToolResult block that passes filter.
+            // If no ToolResult passes, the record produces no valid message — drop it.
             let (call_id, content) = record
                 .content
                 .iter()
@@ -132,35 +141,34 @@ fn record_to_message(record: &TranscriptRecord, filter: &BTreeSet<ContentBlockKi
                 .find_map(|b| match b {
                     ContentBlock::ToolResult {
                         call_id, content, ..
-                    } => Some((Some(call_id.clone()), content.clone())),
+                    } => Some((call_id.clone(), content.clone())),
                     _ => None,
-                })
-                .unwrap_or_else(|| (None, filtered_text_content(&record.content, filter)));
+                })?;
 
-            Message {
+            Some(Message {
                 role: Role::Tool,
                 content: Some(content),
                 tool_calls: vec![],
-                tool_call_id: call_id,
-            }
+                tool_call_id: Some(call_id),
+            })
         }
         TranscriptRole::System => {
             let text = filtered_text_content(&record.content, filter);
-            Message {
+            Some(Message {
                 role: Role::System,
                 content: Some(text),
                 tool_calls: vec![],
                 tool_call_id: None,
-            }
+            })
         }
         TranscriptRole::Developer => {
             let text = filtered_text_content(&record.content, filter);
-            Message {
+            Some(Message {
                 role: Role::Developer,
                 content: Some(text),
                 tool_calls: vec![],
                 tool_call_id: None,
-            }
+            })
         }
     }
 }
@@ -455,13 +463,11 @@ mod tests {
             provider: None,
             metadata: HashMap::new(),
         };
-        // Only Thinking allowed — Text should be excluded
+        // Only Thinking allowed — Text excluded, no tool_calls → entire message dropped
         let filter: BTreeSet<ContentBlockKind> = [ContentBlockKind::Thinking].into_iter().collect();
         let msgs = transcript_to_messages(&[rec], &filter);
-        assert_eq!(msgs.len(), 1);
-        // text_content from filtered blocks: Text block excluded, so empty
-        assert!(msgs[0].content.is_none() || msgs[0].content.as_deref() == Some(""));
-        assert!(msgs[0].tool_calls.is_empty());
+        // Filtering removes all LLM-visible content; assistant message is dropped entirely
+        assert!(msgs.is_empty());
     }
 
     #[test]
@@ -555,13 +561,138 @@ mod tests {
     #[test]
     fn filter_excludes_tool_result_from_tool_role_record() {
         let rec = tool_result_to_transcript("call_1", "file_read", "file contents", None);
-        // Only Text kind — ToolResult should be excluded, fallback to text_content("")
+        // Only Text kind — ToolResult should be excluded, entire Tool record dropped
         let filter: BTreeSet<ContentBlockKind> = [ContentBlockKind::Text].into_iter().collect();
         let msgs = transcript_to_messages(&[rec], &filter);
-        // Tool role with no ToolResult block found → falls back to empty text_content
+        // Tool role with no ToolResult block found → entire message dropped
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn filter_drops_empty_assistant_message() {
+        // Assistant record with only a ToolCall block + {Text} filter
+        // → filtered result has no text and no tool_calls → entire message dropped
+        let rec = TranscriptRecord {
+            id: generate_record_id(),
+            parent_id: None,
+            role: TranscriptRole::Assistant,
+            content: vec![ContentBlock::ToolCall {
+                call_id: "c1".into(),
+                name: "echo".into(),
+                arguments: "{}".into(),
+            }],
+            timestamp: "t".into(),
+            model: None,
+            stop_reason: None,
+            usage: None,
+            provider: None,
+            metadata: HashMap::new(),
+        };
+        let filter: BTreeSet<ContentBlockKind> = [ContentBlockKind::Text].into_iter().collect();
+        let msgs = transcript_to_messages(&[rec], &filter);
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn filter_text_only_drops_tool_cycle_preserves_text() {
+        // Multi-turn: User(text) → Assistant(text+tool_call) → Tool(tool_result) → Assistant(text)
+        // {Text} filter → [User, Assistant(text only), Assistant(text only)], Tool dropped
+        let user_rec = user_input_to_transcript("what is 2+2?");
+        let assistant_with_tool = TranscriptRecord {
+            id: generate_record_id(),
+            parent_id: None,
+            role: TranscriptRole::Assistant,
+            content: vec![
+                ContentBlock::Text {
+                    text: "Let me calculate.".into(),
+                },
+                ContentBlock::ToolCall {
+                    call_id: "c1".into(),
+                    name: "calc".into(),
+                    arguments: r#"{"expr":"2+2"}"#.into(),
+                },
+            ],
+            timestamp: "t".into(),
+            model: None,
+            stop_reason: None,
+            usage: None,
+            provider: None,
+            metadata: HashMap::new(),
+        };
+        let tool_rec = tool_result_to_transcript("c1", "calc", "4", None);
+        let final_assistant = assistant_output_to_transcript("The answer is 4.");
+
+        let records = vec![user_rec, assistant_with_tool, tool_rec, final_assistant];
+        let filter: BTreeSet<ContentBlockKind> = [ContentBlockKind::Text].into_iter().collect();
+        let msgs = transcript_to_messages(&records, &filter);
+
+        // Tool record dropped; assistant with text preserved (tool_call stripped)
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].role, Role::User);
+        assert_eq!(msgs[1].role, Role::Assistant);
+        assert_eq!(msgs[1].content.as_deref(), Some("Let me calculate."));
+        assert!(msgs[1].tool_calls.is_empty());
+        assert_eq!(msgs[2].role, Role::Assistant);
+        assert_eq!(msgs[2].content.as_deref(), Some("The answer is 4."));
+    }
+
+    #[test]
+    fn filter_with_tool_kinds_preserves_tool_cycle() {
+        // {Text, ToolCall, ToolResult} filter → all messages preserved, tool_call_id present
+        let user_rec = user_input_to_transcript("run it");
+        let assistant_with_tool = TranscriptRecord {
+            id: generate_record_id(),
+            parent_id: None,
+            role: TranscriptRole::Assistant,
+            content: vec![
+                ContentBlock::Text {
+                    text: "Running…".into(),
+                },
+                ContentBlock::ToolCall {
+                    call_id: "c2".into(),
+                    name: "run".into(),
+                    arguments: "{}".into(),
+                },
+            ],
+            timestamp: "t".into(),
+            model: None,
+            stop_reason: None,
+            usage: None,
+            provider: None,
+            metadata: HashMap::new(),
+        };
+        let tool_rec = tool_result_to_transcript("c2", "run", "done", None);
+
+        let records = vec![user_rec, assistant_with_tool, tool_rec];
+        let filter: BTreeSet<ContentBlockKind> = [
+            ContentBlockKind::Text,
+            ContentBlockKind::ToolCall,
+            ContentBlockKind::ToolResult,
+        ]
+        .into_iter()
+        .collect();
+        let msgs = transcript_to_messages(&records, &filter);
+
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].role, Role::User);
+        assert_eq!(msgs[1].role, Role::Assistant);
+        assert_eq!(msgs[1].tool_calls.len(), 1);
+        assert_eq!(msgs[1].tool_calls[0].id, "c2");
+        assert_eq!(msgs[2].role, Role::Tool);
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("c2"));
+        assert_eq!(msgs[2].content.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn empty_filter_preserves_tool_messages() {
+        // Empty filter = backward compatible, all messages pass through
+        let tool_rec = tool_result_to_transcript("c3", "file_read", "contents", None);
+        let filter: BTreeSet<ContentBlockKind> = BTreeSet::new();
+        let msgs = transcript_to_messages(&[tool_rec], &filter);
+        assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].role, Role::Tool);
-        assert!(msgs[0].content.as_deref() == Some("") || msgs[0].content.is_none());
-        assert!(msgs[0].tool_call_id.is_none());
+        assert_eq!(msgs[0].tool_call_id.as_deref(), Some("c3"));
+        assert_eq!(msgs[0].content.as_deref(), Some("contents"));
     }
 
     #[test]

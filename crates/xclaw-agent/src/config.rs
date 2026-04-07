@@ -1,10 +1,13 @@
 //! Agent engine configuration and runtime context.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use xclaw_memory::role::daily::DailyMemory;
 use xclaw_memory::role::manager::RoleManager;
 use xclaw_memory::session::store::SessionStore;
+use xclaw_memory::session::types::ContentBlockKind;
 use xclaw_memory::workspace::loader::MemoryFileLoader;
 use xclaw_tools::registry::ToolRegistry;
 
@@ -25,6 +28,14 @@ pub struct AgentConfig {
     /// Optional max_tokens override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// Content block kinds to include from historical sessions.
+    /// Defaults to `{Text}` — other types (ToolCall, ToolResult, etc.) are
+    /// excluded unless explicitly added here.
+    ///
+    /// **Note:** an empty set means "no filtering" (all types included),
+    /// not "exclude everything". Always include at least `Text`.
+    #[serde(default = "default_history_content_kinds")]
+    pub history_content_kinds: BTreeSet<ContentBlockKind>,
     /// Enable debug output (print assembled prompt to stderr).
     /// Skipped from serde — this is a CLI-only runtime flag, never persisted.
     #[serde(skip)]
@@ -39,6 +50,10 @@ fn default_transcript_tail() -> usize {
     20
 }
 
+fn default_history_content_kinds() -> BTreeSet<ContentBlockKind> {
+    BTreeSet::from([ContentBlockKind::Text])
+}
+
 impl AgentConfig {
     /// Create a config with required fields; optional fields use defaults.
     pub fn new(model: impl Into<String>) -> Self {
@@ -46,6 +61,7 @@ impl AgentConfig {
             model: model.into(),
             max_tool_rounds: default_max_tool_rounds(),
             transcript_tail_size: default_transcript_tail(),
+            history_content_kinds: default_history_content_kinds(),
             temperature: None,
             max_tokens: None,
             debug: false,
@@ -64,6 +80,14 @@ impl AgentConfig {
     pub fn with_transcript_tail(self, n: usize) -> Self {
         Self {
             transcript_tail_size: n,
+            ..self
+        }
+    }
+
+    /// Builder-style setter for history_content_kinds.
+    pub fn with_history_content_kinds(self, kinds: BTreeSet<ContentBlockKind>) -> Self {
+        Self {
+            history_content_kinds: kinds,
             ..self
         }
     }
@@ -142,6 +166,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use xclaw_memory::session::types::ContentBlockKind;
+
     use super::*;
 
     // ── AgentConfig ─────────────────────────────────────────────────────
@@ -259,5 +287,44 @@ mod tests {
         // Deserialized config always has debug=false (skipped field)
         let back: AgentConfig = serde_json::from_str(&json).unwrap();
         assert!(!back.debug);
+    }
+
+    // ── history_content_kinds ───────────────────────────────────────────
+
+    #[test]
+    fn new_defaults_history_content_kinds_to_text_only() {
+        let cfg = AgentConfig::new("gpt-4o");
+        assert_eq!(cfg.history_content_kinds.len(), 1);
+        assert!(cfg.history_content_kinds.contains(&ContentBlockKind::Text));
+    }
+
+    #[test]
+    fn with_history_content_kinds_sets_filter() {
+        let kinds: BTreeSet<ContentBlockKind> =
+            [ContentBlockKind::Text, ContentBlockKind::ToolCall]
+                .into_iter()
+                .collect();
+        let cfg = AgentConfig::new("gpt-4o").with_history_content_kinds(kinds.clone());
+        assert_eq!(cfg.history_content_kinds, kinds);
+    }
+
+    #[test]
+    fn serde_missing_history_content_kinds_uses_default() {
+        let json = r#"{"model":"gpt-4o"}"#;
+        let cfg: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.history_content_kinds.len(), 1);
+        assert!(cfg.history_content_kinds.contains(&ContentBlockKind::Text));
+    }
+
+    #[test]
+    fn serde_explicit_history_content_kinds_roundtrip() {
+        let kinds: BTreeSet<ContentBlockKind> =
+            [ContentBlockKind::Text, ContentBlockKind::ToolCall]
+                .into_iter()
+                .collect();
+        let cfg = AgentConfig::new("gpt-4o").with_history_content_kinds(kinds.clone());
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.history_content_kinds, kinds);
     }
 }

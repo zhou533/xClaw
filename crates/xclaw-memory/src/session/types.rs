@@ -257,7 +257,8 @@ pub struct SessionSummary {
 ///
 /// Enables filtering content blocks by type without pattern-matching on data,
 /// and supports composable multi-select filters via `BTreeSet<ContentBlockKind>`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ContentBlockKind {
     Text,
@@ -728,6 +729,35 @@ mod tests {
                 .collect();
         assert!(kinds.contains(&ContentBlockKind::Text));
         assert!(!kinds.contains(&ContentBlockKind::Thinking));
+    }
+
+    #[test]
+    fn content_block_kind_serde_roundtrip() {
+        for (kind, expected_json) in [
+            (ContentBlockKind::Text, "\"text\""),
+            (ContentBlockKind::Thinking, "\"thinking\""),
+            (ContentBlockKind::ToolCall, "\"tool_call\""),
+            (ContentBlockKind::ToolResult, "\"tool_result\""),
+            (ContentBlockKind::Image, "\"image\""),
+            (ContentBlockKind::Unknown, "\"unknown\""),
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(json, expected_json, "serialization mismatch for {kind:?}");
+            let back: ContentBlockKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, kind, "deserialization mismatch for {expected_json}");
+        }
+    }
+
+    #[test]
+    fn content_block_kind_btreeset_serde_roundtrip() {
+        use std::collections::BTreeSet;
+        let kinds: BTreeSet<ContentBlockKind> =
+            [ContentBlockKind::Text, ContentBlockKind::ToolCall]
+                .into_iter()
+                .collect();
+        let json = serde_json::to_string(&kinds).unwrap();
+        let back: BTreeSet<ContentBlockKind> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, kinds);
     }
 
     #[test]

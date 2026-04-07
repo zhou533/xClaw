@@ -191,7 +191,7 @@ where
         let tool_schemas = self.tool_registry.list_schemas();
         let request = ChatRequestBuilder::new(&self.config.model)
             .with_system_prompt(&system_prompt)
-            .with_history(&history)
+            .with_history_filtered(&history, &self.config.history_content_kinds)
             .with_user_message(&input.content)
             .with_tool_schemas(&tool_schemas)
             .with_temperature(self.config.temperature)
@@ -585,6 +585,98 @@ mod tests {
         assert_eq!(msg.role, Role::Tool);
         assert_eq!(msg.content.as_deref(), Some("hello"));
         assert_eq!(msg.tool_call_id.as_deref(), Some("c1"));
+    }
+
+    #[tokio::test]
+    async fn history_uses_configured_content_kinds() {
+        use std::collections::BTreeSet;
+        use xclaw_memory::session::types::{
+            ContentBlock, ContentBlockKind, TranscriptRecord, TranscriptRole,
+        };
+
+        // Seed history with a user text + assistant record containing Text + ToolCall
+        let history = vec![
+            TranscriptRecord {
+                id: "rec1".into(),
+                parent_id: None,
+                role: TranscriptRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "use a tool".into(),
+                }],
+                timestamp: "2026-04-07T00:00:00Z".into(),
+                model: None,
+                stop_reason: None,
+                usage: None,
+                provider: None,
+                metadata: std::collections::HashMap::new(),
+            },
+            TranscriptRecord {
+                id: "rec2".into(),
+                parent_id: Some("rec1".into()),
+                role: TranscriptRole::Assistant,
+                content: vec![
+                    ContentBlock::Text {
+                        text: "I will call a tool".into(),
+                    },
+                    ContentBlock::ToolCall {
+                        call_id: "call_old".into(),
+                        name: "echo".into(),
+                        arguments: r#"{"text":"hi"}"#.into(),
+                    },
+                ],
+                timestamp: "2026-04-07T00:00:01Z".into(),
+                model: Some("stub".into()),
+                stop_reason: None,
+                usage: None,
+                provider: None,
+                metadata: std::collections::HashMap::new(),
+            },
+        ];
+
+        let sessions = StubSessionStore::new().with_history(history);
+        let roles = StubRoleManager;
+        let files = StubMemoryFileLoader;
+        let daily = StubDailyMemory;
+        let registry = ToolRegistry::new();
+
+        // Config: only Text in history (default)
+        let config = AgentConfig::new("test-model")
+            .with_max_tool_rounds(5)
+            .with_transcript_tail(10);
+        assert_eq!(
+            config.history_content_kinds,
+            BTreeSet::from([ContentBlockKind::Text])
+        );
+
+        let provider = CapturingProvider::new("ok");
+        let captured = provider.captured.clone();
+
+        let agent = LoopAgent::new(
+            provider, config, &sessions, &roles, &files, &daily, &registry, "/tmp",
+        );
+
+        agent.process(make_input("hello")).await.unwrap();
+
+        // The first captured request should have history messages with no tool calls
+        let reqs = captured.lock().unwrap();
+        assert!(!reqs.is_empty(), "provider should have been called");
+        let req = &reqs[0];
+
+        // Find the assistant history message (not the current user message)
+        let assistant_msgs: Vec<_> = req
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .collect();
+        // History should contain the assistant message with text only (no tool calls)
+        for msg in &assistant_msgs {
+            assert!(
+                msg.tool_calls.is_empty(),
+                "history assistant messages should have no tool_calls when filter is Text-only, \
+                 but got: {:?}",
+                msg.tool_calls
+            );
+        }
     }
 
     #[test]
