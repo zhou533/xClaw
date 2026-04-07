@@ -9,7 +9,7 @@ use xclaw_core::types::RoleId;
 
 use crate::error::MemoryError;
 use crate::role::config::{RoleConfig, RolesFile, parse_roles_file, serialize_roles_file};
-use crate::workspace::templates::ensure_bootstrap_templates;
+use crate::workspace::templates::seed_new_role_templates;
 
 /// Role lifecycle manager.
 pub trait RoleManager: Send + Sync {
@@ -110,8 +110,8 @@ impl RoleManager for FsRoleManager {
         roles.insert(role_id.as_str().to_string(), config.clone());
         self.save_roles_file(&roles).await?;
 
-        // Seed bootstrap template files (idempotent; failures are only warnings)
-        ensure_bootstrap_templates(&role_dir).await;
+        // Seed all template files including BOOTSTRAP.md (new role only)
+        seed_new_role_templates(&role_dir).await;
 
         tracing::info!(role = config.name, "created role");
         Ok(())

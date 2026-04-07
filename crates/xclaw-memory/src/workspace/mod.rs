@@ -5,5 +5,5 @@ pub mod templates;
 pub mod types;
 
 pub use loader::{FsMemoryFileLoader, MemoryFileLoader};
-pub use templates::{bootstrap_template, ensure_bootstrap_templates};
+pub use templates::{bootstrap_template, seed_new_role_templates, supplement_missing_templates};
 pub use types::{MemoryFileKind, MemorySnapshot};

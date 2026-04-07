@@ -62,17 +62,43 @@ pub fn bootstrap_template(kind: MemoryFileKind) -> Option<&'static str> {
     }
 }
 
-/// Write any missing bootstrap template files into `role_dir`.
+/// Seed **all** template files into `role_dir`, including `BOOTSTRAP.md`.
+///
+/// Call this only when creating a brand-new role. For an existing role that
+/// may be missing some persistent templates, use
+/// [`supplement_missing_templates`] instead — it deliberately skips
+/// `BOOTSTRAP.md` because that file is a one-time initialization guide that
+/// the agent deletes once onboarding is complete.
 ///
 /// Files that already exist are left untouched (idempotent).
 /// Write failures are logged as warnings but do **not** abort the operation.
 /// Uses `create_new(true)` to avoid TOCTOU races between the existence check
 /// and the write.
-pub async fn ensure_bootstrap_templates(role_dir: &Path) {
+pub async fn seed_new_role_templates(role_dir: &Path) {
+    write_templates(role_dir, false).await;
+}
+
+/// Re-seed only the **persistent** template files into `role_dir`.
+///
+/// `BOOTSTRAP.md` is intentionally excluded: it is a one-time initialization
+/// guide that the agent deletes after onboarding. Re-creating it on an
+/// already-initialized role would restart the onboarding flow.
+pub async fn supplement_missing_templates(role_dir: &Path) {
+    write_templates(role_dir, true).await;
+}
+
+/// Shared implementation: write missing template files into `role_dir`.
+///
+/// When `skip_bootstrap` is `true`, `MemoryFileKind::Bootstrap` is excluded.
+async fn write_templates(role_dir: &Path, skip_bootstrap: bool) {
     use tokio::fs::OpenOptions;
     use tokio::io::AsyncWriteExt;
 
     for kind in MemoryFileKind::all() {
+        if skip_bootstrap && *kind == MemoryFileKind::Bootstrap {
+            continue;
+        }
+
         let Some(content) = bootstrap_template(*kind) else {
             continue;
         };
@@ -187,12 +213,12 @@ mod tests {
         assert_eq!(count, 7, "exactly 7 of the 8 kinds should have templates");
     }
 
-    // ── ensure_bootstrap_templates ────────────────────────────────────────────
+    // ── seed_new_role_templates ─────────────────────────────────────────────
 
     #[tokio::test]
-    async fn writes_all_seven_template_files() {
+    async fn seed_writes_all_seven_template_files() {
         let tmp = tempfile::TempDir::new().unwrap();
-        ensure_bootstrap_templates(tmp.path()).await;
+        seed_new_role_templates(tmp.path()).await;
 
         for kind in MemoryFileKind::all() {
             if bootstrap_template(*kind).is_none() {
@@ -210,14 +236,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn does_not_overwrite_existing_files() {
+    async fn seed_includes_bootstrap_md() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        seed_new_role_templates(tmp.path()).await;
+
+        let path = tmp.path().join("BOOTSTRAP.md");
+        assert!(path.exists(), "seed must create BOOTSTRAP.md for new roles");
+    }
+
+    #[tokio::test]
+    async fn seed_does_not_overwrite_existing_files() {
         let tmp = tempfile::TempDir::new().unwrap();
         let agents_path = tmp.path().join("AGENTS.md");
 
-        // Pre-write custom content
         std::fs::write(&agents_path, "CUSTOM CONTENT").unwrap();
 
-        ensure_bootstrap_templates(tmp.path()).await;
+        seed_new_role_templates(tmp.path()).await;
 
         let content = std::fs::read_to_string(&agents_path).unwrap();
         assert_eq!(
@@ -227,16 +261,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn idempotent_on_second_call() {
+    async fn seed_idempotent_on_second_call() {
         let tmp = tempfile::TempDir::new().unwrap();
 
-        ensure_bootstrap_templates(tmp.path()).await;
+        seed_new_role_templates(tmp.path()).await;
 
-        // Overwrite with a sentinel to prove second call doesn't touch it
         let agents_path = tmp.path().join("AGENTS.md");
         std::fs::write(&agents_path, "SENTINEL").unwrap();
 
-        ensure_bootstrap_templates(tmp.path()).await;
+        seed_new_role_templates(tmp.path()).await;
 
         let content = std::fs::read_to_string(&agents_path).unwrap();
         assert_eq!(
@@ -246,14 +279,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn heartbeat_file_is_not_created() {
+    async fn seed_heartbeat_file_is_not_created() {
         let tmp = tempfile::TempDir::new().unwrap();
-        ensure_bootstrap_templates(tmp.path()).await;
+        seed_new_role_templates(tmp.path()).await;
 
         let heartbeat_path = tmp.path().join("HEARTBEAT.md");
         assert!(
             !heartbeat_path.exists(),
             "HEARTBEAT.md must not be created (no template)"
         );
+    }
+
+    // ── supplement_missing_templates ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn supplement_skips_bootstrap_md() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        supplement_missing_templates(tmp.path()).await;
+
+        let path = tmp.path().join("BOOTSTRAP.md");
+        assert!(
+            !path.exists(),
+            "supplement must NOT create BOOTSTRAP.md on existing roles"
+        );
+    }
+
+    #[tokio::test]
+    async fn supplement_does_not_recreate_deleted_bootstrap() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Simulate: new role was seeded, then agent deleted BOOTSTRAP.md
+        seed_new_role_templates(tmp.path()).await;
+        std::fs::remove_file(tmp.path().join("BOOTSTRAP.md")).unwrap();
+
+        // Upgrade path — must not bring it back
+        supplement_missing_templates(tmp.path()).await;
+
+        assert!(
+            !tmp.path().join("BOOTSTRAP.md").exists(),
+            "supplement must not re-create deleted BOOTSTRAP.md"
+        );
+    }
+
+    #[tokio::test]
+    async fn supplement_creates_other_missing_templates() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        supplement_missing_templates(tmp.path()).await;
+
+        // Persistent templates should be created
+        assert!(tmp.path().join("AGENTS.md").exists());
+        assert!(tmp.path().join("SOUL.md").exists());
+        assert!(tmp.path().join("TOOLS.md").exists());
+        assert!(tmp.path().join("IDENTITY.md").exists());
+        assert!(tmp.path().join("USER.md").exists());
+        assert!(tmp.path().join("MEMORY.md").exists());
     }
 }

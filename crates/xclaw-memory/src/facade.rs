@@ -71,14 +71,17 @@ where
     ///
     /// On a fresh install this calls `create_role`, which seeds all bootstrap
     /// templates.  On an upgrade (role already exists) it calls
-    /// `ensure_bootstrap_templates` directly so any missing files are added.
+    /// `supplement_missing_templates` directly so any missing persistent files
+    /// are added (but not `BOOTSTRAP.md`, which is a one-time init guide).
     pub async fn ensure_default_role(&self) -> Result<(), MemoryError> {
         let default_id = xclaw_core::types::RoleId::default();
         match self.roles.get_role(&default_id).await {
             Ok(_) => {
-                // Role exists — supplement any missing bootstrap templates.
+                // Role exists — supplement missing persistent templates.
+                // BOOTSTRAP.md is intentionally skipped: it is a one-time
+                // initialization guide that the agent deletes after onboarding.
                 let role_dir = self.roles.role_dir(&default_id);
-                crate::workspace::templates::ensure_bootstrap_templates(&role_dir).await;
+                crate::workspace::templates::supplement_missing_templates(&role_dir).await;
                 Ok(())
             }
             Err(MemoryError::RoleNotFound(_)) => {
@@ -180,17 +183,24 @@ mod tests {
         // Act
         mem.ensure_default_role().await.unwrap();
 
-        // Assert: all 7 template files were seeded
+        // Assert: persistent templates were seeded (6 of 7, excluding Bootstrap)
         for kind in MemoryFileKind::all() {
             if bootstrap_template(*kind).is_none() {
                 continue;
             }
             let path = default_role_dir.join(kind.filename());
-            assert!(
-                path.exists(),
-                "expected {} to be seeded by ensure_default_role on existing role",
-                kind.filename()
-            );
+            if *kind == MemoryFileKind::Bootstrap {
+                assert!(
+                    !path.exists(),
+                    "BOOTSTRAP.md must NOT be created for existing roles"
+                );
+            } else {
+                assert!(
+                    path.exists(),
+                    "expected {} to be seeded by ensure_default_role on existing role",
+                    kind.filename()
+                );
+            }
         }
     }
 
