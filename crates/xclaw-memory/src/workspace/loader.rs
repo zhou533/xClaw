@@ -36,6 +36,15 @@ pub trait MemoryFileLoader: Send + Sync {
         kind: MemoryFileKind,
     ) -> impl std::future::Future<Output = Result<bool, MemoryError>> + Send;
 
+    /// Append content to a memory file. If the file exists, appends with a
+    /// `\n\n` separator. If it does not exist, creates it with the content.
+    fn append_file(
+        &self,
+        role: &RoleId,
+        kind: MemoryFileKind,
+        content: &str,
+    ) -> impl std::future::Future<Output = Result<(), MemoryError>> + Send;
+
     /// Load all memory files as a snapshot.
     fn load_snapshot(
         &self,
@@ -100,6 +109,19 @@ impl MemoryFileLoader for FsMemoryFileLoader {
         tokio::fs::write(tmp.path(), content).await?;
         tmp.persist(&path).map_err(|e| e.error)?;
         Ok(())
+    }
+
+    async fn append_file(
+        &self,
+        role: &RoleId,
+        kind: MemoryFileKind,
+        content: &str,
+    ) -> Result<(), MemoryError> {
+        let new_content = match self.load_file(role, kind).await? {
+            Some(existing) => format!("{existing}\n\n{content}"),
+            None => content.to_owned(),
+        };
+        self.save_file(role, kind, &new_content).await
     }
 
     async fn delete_file(&self, role: &RoleId, kind: MemoryFileKind) -> Result<bool, MemoryError> {
@@ -347,6 +369,63 @@ mod tests {
             .await
             .unwrap();
         assert!(!second);
+    }
+
+    #[tokio::test]
+    async fn append_to_nonexistent_creates_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let loader = setup(tmp.path());
+        let role = RoleId::default();
+
+        loader
+            .append_file(&role, MemoryFileKind::Soul, "# New Content")
+            .await
+            .unwrap();
+
+        let content = loader.load_file(&role, MemoryFileKind::Soul).await.unwrap();
+        assert_eq!(content.as_deref(), Some("# New Content"));
+    }
+
+    #[tokio::test]
+    async fn append_to_existing_appends_with_separator() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let loader = setup(tmp.path());
+        let role = RoleId::default();
+
+        loader
+            .save_file(&role, MemoryFileKind::Soul, "# Original")
+            .await
+            .unwrap();
+        loader
+            .append_file(&role, MemoryFileKind::Soul, "## Appended")
+            .await
+            .unwrap();
+
+        let content = loader.load_file(&role, MemoryFileKind::Soul).await.unwrap();
+        assert_eq!(content.as_deref(), Some("# Original\n\n## Appended"));
+    }
+
+    #[tokio::test]
+    async fn append_multiple_times_accumulates() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let loader = setup(tmp.path());
+        let role = RoleId::default();
+
+        loader
+            .save_file(&role, MemoryFileKind::User, "first")
+            .await
+            .unwrap();
+        loader
+            .append_file(&role, MemoryFileKind::User, "second")
+            .await
+            .unwrap();
+        loader
+            .append_file(&role, MemoryFileKind::User, "third")
+            .await
+            .unwrap();
+
+        let content = loader.load_file(&role, MemoryFileKind::User).await.unwrap();
+        assert_eq!(content.as_deref(), Some("first\n\nsecond\n\nthird"));
     }
 
     #[tokio::test]

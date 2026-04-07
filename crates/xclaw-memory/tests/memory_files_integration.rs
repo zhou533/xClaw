@@ -189,6 +189,68 @@ async fn workspace_delete_then_snapshot_excludes_deleted() {
     );
 }
 
+// ─── append_file ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn append_to_nonexistent_creates_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let role = default_role();
+
+    loader
+        .append_file(&role, MemoryFileKind::Soul, "# New Section")
+        .await
+        .unwrap();
+
+    let content = loader.load_file(&role, MemoryFileKind::Soul).await.unwrap();
+    assert_eq!(content.as_deref(), Some("# New Section"));
+}
+
+#[tokio::test]
+async fn append_to_existing_preserves_original() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let role = default_role();
+
+    loader
+        .save_file(&role, MemoryFileKind::User, "# Original")
+        .await
+        .unwrap();
+    loader
+        .append_file(&role, MemoryFileKind::User, "## Appended")
+        .await
+        .unwrap();
+
+    let content = loader.load_file(&role, MemoryFileKind::User).await.unwrap();
+    assert_eq!(content.as_deref(), Some("# Original\n\n## Appended"));
+}
+
+#[tokio::test]
+async fn append_multiple_accumulates() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let role = default_role();
+
+    loader
+        .save_file(&role, MemoryFileKind::Agents, "entry1")
+        .await
+        .unwrap();
+    loader
+        .append_file(&role, MemoryFileKind::Agents, "entry2")
+        .await
+        .unwrap();
+    loader
+        .append_file(&role, MemoryFileKind::Agents, "entry3")
+        .await
+        .unwrap();
+
+    let content = loader
+        .load_file(&role, MemoryFileKind::Agents)
+        .await
+        .unwrap();
+    assert_eq!(content.as_deref(), Some("entry1\n\nentry2\n\nentry3"));
+}
+
 // ─── MemoryFileLoader (workspace files) ─────────────────────────────────────
 
 #[tokio::test]

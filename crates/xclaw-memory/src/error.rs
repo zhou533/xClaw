@@ -40,6 +40,18 @@ pub enum MemoryError {
 
     #[error("time parse error: {0}")]
     TimeParse(String),
+
+    #[error("content hash mismatch: file changed since last read")]
+    StaleContent { expected: String, actual: String },
+
+    #[error("line out of range: {line} (file has {total} lines)")]
+    LineOutOfRange { line: usize, total: usize },
+
+    #[error("invalid line range: start {start} > end {end}")]
+    InvalidLineRange { start: usize, end: usize },
+
+    #[error("unknown edit operation: {0}")]
+    UnknownOperation(String),
 }
 
 impl From<MemoryError> for XClawError {
@@ -149,5 +161,48 @@ mod tests {
         let xclaw: XClawError = err.into();
         assert!(matches!(xclaw, XClawError::Memory(_)));
         assert!(xclaw.to_string().contains("session not found: sess-1"));
+    }
+
+    #[test]
+    fn stale_content_display() {
+        let err = MemoryError::StaleContent {
+            expected: "abc123".into(),
+            actual: "xyz789".into(),
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("content hash mismatch"),
+            "expected 'content hash mismatch' in: {msg}"
+        );
+    }
+
+    #[test]
+    fn line_out_of_range_display() {
+        let err = MemoryError::LineOutOfRange {
+            line: 42,
+            total: 10,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("42"), "expected line number in: {msg}");
+        assert!(msg.contains("10"), "expected total lines in: {msg}");
+    }
+
+    #[test]
+    fn invalid_line_range_display() {
+        let err = MemoryError::InvalidLineRange { start: 5, end: 3 };
+        let msg = err.to_string();
+        assert!(msg.contains("5"), "expected start in: {msg}");
+        assert!(msg.contains("3"), "expected end in: {msg}");
+    }
+
+    #[test]
+    fn unknown_operation_display() {
+        let err = MemoryError::UnknownOperation("foobar".into());
+        let msg = err.to_string();
+        assert!(msg.contains("foobar"), "expected operation name in: {msg}");
+        assert!(
+            msg.contains("unknown edit operation"),
+            "expected prefix in: {msg}"
+        );
     }
 }

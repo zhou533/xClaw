@@ -72,6 +72,9 @@ libc = "0.2"
 # ID generation
 nanoid = "0.4"
 
+# Hashing
+sha2 = "0.10"
+
 # Test utilities
 tempfile = "3"
 mockito = "1"

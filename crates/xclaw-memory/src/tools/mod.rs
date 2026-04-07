@@ -27,7 +27,11 @@ pub(crate) fn to_tool_error(e: MemoryError) -> ToolError {
         MemoryError::RoleNotFound(_)
         | MemoryError::InvalidRoleId(_)
         | MemoryError::RoleAlreadyExists(_)
-        | MemoryError::InvalidDate(_) => ToolError::InvalidParams(e.to_string()),
+        | MemoryError::InvalidDate(_)
+        | MemoryError::StaleContent { .. }
+        | MemoryError::LineOutOfRange { .. }
+        | MemoryError::InvalidLineRange { .. }
+        | MemoryError::UnknownOperation(_) => ToolError::InvalidParams(e.to_string()),
         _ => ToolError::Internal(e.to_string()),
     }
 }
@@ -75,9 +79,39 @@ mod tests {
         let err = to_tool_error(MemoryError::YamlParse("bad yaml".into()));
         assert!(matches!(err, ToolError::Internal(_)));
     }
+
+    #[test]
+    fn to_tool_error_maps_stale_content_to_invalid_params() {
+        let err = to_tool_error(MemoryError::StaleContent {
+            expected: "abc".into(),
+            actual: "xyz".into(),
+        });
+        assert!(matches!(err, ToolError::InvalidParams(_)));
+    }
+
+    #[test]
+    fn to_tool_error_maps_line_out_of_range_to_invalid_params() {
+        let err = to_tool_error(MemoryError::LineOutOfRange { line: 5, total: 3 });
+        assert!(matches!(err, ToolError::InvalidParams(_)));
+    }
+
+    #[test]
+    fn to_tool_error_maps_invalid_line_range_to_invalid_params() {
+        let err = to_tool_error(MemoryError::InvalidLineRange { start: 5, end: 2 });
+        assert!(matches!(err, ToolError::InvalidParams(_)));
+    }
+
+    #[test]
+    fn to_tool_error_maps_unknown_operation_to_invalid_params() {
+        let err = to_tool_error(MemoryError::UnknownOperation("bad_op".into()));
+        assert!(matches!(err, ToolError::InvalidParams(_)));
+        assert!(err.to_string().contains("bad_op"));
+    }
 }
 
-pub use memory_file_tools::{MemoryFileDeleteTool, MemoryFileReadTool, MemoryFileWriteTool};
+pub use memory_file_tools::{
+    MemoryFileAppendTool, MemoryFileDeleteTool, MemoryFileEditTool, MemoryFileReadTool,
+};
 pub use memory_tools::{MemoryDailyAppendTool, MemoryDailyReadTool};
 pub use role_tools::{RoleCreateTool, RoleDeleteTool, RoleGetTool, RoleListTool};
 
@@ -90,7 +124,8 @@ pub fn register_memory_tools(registry: &mut ToolRegistry, base_dir: PathBuf) {
     registry.register(RoleDeleteTool::new(&base_dir));
     // Memory file tools
     registry.register(MemoryFileReadTool::new(&base_dir));
-    registry.register(MemoryFileWriteTool::new(&base_dir));
+    registry.register(MemoryFileAppendTool::new(&base_dir));
+    registry.register(MemoryFileEditTool::new(&base_dir));
     registry.register(MemoryFileDeleteTool::new(&base_dir));
     // Daily tools
     registry.register(MemoryDailyAppendTool::new(&base_dir));

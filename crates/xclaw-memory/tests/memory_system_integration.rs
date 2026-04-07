@@ -6,7 +6,7 @@ use xclaw_core::types::RoleId;
 use xclaw_memory::facade::FsMemorySystem;
 use xclaw_memory::role::daily::DailyMemory;
 use xclaw_memory::tools::register_memory_tools;
-use xclaw_memory::workspace::loader::MemoryFileLoader;
+use xclaw_memory::workspace::loader::{FsMemoryFileLoader, MemoryFileLoader};
 use xclaw_memory::workspace::types::MemoryFileKind;
 use xclaw_tools::registry::ToolRegistry;
 use xclaw_tools::traits::{ToolContext, WorkspaceScope};
@@ -19,6 +19,16 @@ fn setup() -> (tempfile::TempDir, FsMemorySystem) {
 
 fn make_ctx(tmp: &tempfile::TempDir) -> ToolContext {
     ToolContext::new(WorkspaceScope::new(tmp.path()), Duration::from_secs(30))
+}
+
+/// Extract the content_hash from the YAML front matter returned by memory_file_read.
+fn extract_hash(output: &str) -> &str {
+    for line in output.lines() {
+        if let Some(hash) = line.strip_prefix("content_hash: ") {
+            return hash.trim();
+        }
+    }
+    panic!("no content_hash found in output:\n{output}");
 }
 
 // ─── Facade Tests ────────────────────────────────────────────────────────────
@@ -82,12 +92,12 @@ async fn facade_full_workflow() {
 // ─── Tools Registration Tests ────────────────────────────────────────────────
 
 #[tokio::test]
-async fn register_memory_tools_adds_9_tools() {
+async fn register_memory_tools_adds_10_tools() {
     let (tmp, _mem) = setup();
     let mut registry = ToolRegistry::new();
     register_memory_tools(&mut registry, tmp.path().to_path_buf());
 
-    assert_eq!(registry.len(), 9);
+    assert_eq!(registry.len(), 10);
 
     // Verify all tool names
     let expected = [
@@ -96,7 +106,8 @@ async fn register_memory_tools_adds_9_tools() {
         "role_get",
         "role_delete",
         "memory_file_read",
-        "memory_file_write",
+        "memory_file_append",
+        "memory_file_edit",
         "memory_file_delete",
         "memory_daily_append",
         "memory_daily_read",
@@ -157,53 +168,57 @@ async fn tool_memory_daily_append_writes_file() {
 }
 
 #[tokio::test]
-async fn tool_memory_file_write_and_read() {
+async fn tool_memory_file_append_and_read() {
     let (tmp, _mem) = setup();
     let mut registry = ToolRegistry::new();
     register_memory_tools(&mut registry, tmp.path().to_path_buf());
 
     let ctx = make_ctx(&tmp);
 
-    // Write via memory_file_write
-    let write_tool = registry.get("memory_file_write").unwrap();
-    let result = write_tool
+    // Append to new file via memory_file_append
+    let append_tool = registry.get("memory_file_append").unwrap();
+    let result = append_tool
         .execute(
             &ctx,
             serde_json::json!({
                 "kind": "soul",
-                "content": "# Persona\nFriendly and helpful"
+                "content": "# Persona\nFriendly and helpful",
+                "content_hash": "__new__"
             }),
         )
         .await
         .unwrap();
     assert!(!result.is_error);
 
-    // Read via memory_file_read
+    // Read via memory_file_read — must return line numbers and hash
     let read_tool = registry.get("memory_file_read").unwrap();
     let result = read_tool
         .execute(&ctx, serde_json::json!({ "kind": "soul" }))
         .await
         .unwrap();
     assert!(!result.is_error);
+    assert!(result.content.contains("content_hash:"));
     assert!(result.content.contains("Friendly and helpful"));
+    assert!(result.content.contains("1 |"));
 }
 
 #[tokio::test]
-async fn tool_memory_file_write_and_read_long_term() {
+async fn tool_memory_file_append_and_read_long_term() {
     let (tmp, _mem) = setup();
     let mut registry = ToolRegistry::new();
     register_memory_tools(&mut registry, tmp.path().to_path_buf());
 
     let ctx = make_ctx(&tmp);
 
-    // Write long-term memory
-    let write_tool = registry.get("memory_file_write").unwrap();
-    let result = write_tool
+    // Create long-term memory
+    let append_tool = registry.get("memory_file_append").unwrap();
+    let result = append_tool
         .execute(
             &ctx,
             serde_json::json!({
                 "kind": "long_term",
-                "content": "# Knowledge\n- User prefers Rust"
+                "content": "# Knowledge\n- User prefers Rust",
+                "content_hash": "__new__"
             }),
         )
         .await
@@ -218,6 +233,7 @@ async fn tool_memory_file_write_and_read_long_term() {
         .unwrap();
     assert!(!result.is_error);
     assert!(result.content.contains("User prefers Rust"));
+    assert!(result.content.contains("content_hash:"));
 }
 
 #[tokio::test]
@@ -274,18 +290,39 @@ async fn tool_memory_file_read_invalid_kind_returns_error() {
 }
 
 #[tokio::test]
-async fn tool_memory_file_write_missing_content_returns_error() {
+async fn tool_memory_file_append_missing_content_returns_error() {
     let (tmp, _mem) = setup();
     let mut registry = ToolRegistry::new();
     register_memory_tools(&mut registry, tmp.path().to_path_buf());
 
     let ctx = make_ctx(&tmp);
-    let tool = registry.get("memory_file_write").unwrap();
+    let tool = registry.get("memory_file_append").unwrap();
     let err = tool
-        .execute(&ctx, serde_json::json!({ "kind": "soul" }))
+        .execute(
+            &ctx,
+            serde_json::json!({ "kind": "soul", "content_hash": "__new__" }),
+        )
         .await
         .unwrap_err();
     assert!(err.to_string().contains("content is required"));
+}
+
+#[tokio::test]
+async fn tool_memory_file_append_missing_hash_returns_error() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+
+    let ctx = make_ctx(&tmp);
+    let tool = registry.get("memory_file_append").unwrap();
+    let err = tool
+        .execute(
+            &ctx,
+            serde_json::json!({ "kind": "soul", "content": "hello" }),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("content_hash is required"));
 }
 
 #[tokio::test]
@@ -340,4 +377,376 @@ async fn tool_role_create_invalid_name_returns_error() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("invalid"));
+}
+
+// ─── Edit Tool Integration Tests ────────────────────────────────────────────
+
+#[tokio::test]
+async fn tool_memory_file_edit_replace() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+    let ctx = make_ctx(&tmp);
+
+    // Create file
+    registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "soul",
+                "content": "line one\nline two\nline three",
+                "content_hash": "__new__"
+            }),
+        )
+        .await
+        .unwrap();
+
+    // Read to get hash
+    let read_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "soul" }))
+        .await
+        .unwrap();
+    let hash = extract_hash(&read_out.content).to_owned();
+
+    // Edit line 2 with replace
+    let edit_result = registry
+        .get("memory_file_edit")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "soul",
+                "content_hash": hash,
+                "line_start": 2,
+                "operation": "replace",
+                "content": "REPLACED LINE"
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(!edit_result.is_error);
+
+    // Verify content
+    let final_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "soul" }))
+        .await
+        .unwrap();
+    assert!(final_out.content.contains("REPLACED LINE"));
+    assert!(final_out.content.contains("line one"));
+    assert!(final_out.content.contains("line three"));
+}
+
+#[tokio::test]
+async fn tool_memory_file_edit_insert_after() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+    let ctx = make_ctx(&tmp);
+
+    registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "user",
+                "content": "alpha\nbeta",
+                "content_hash": "__new__"
+            }),
+        )
+        .await
+        .unwrap();
+
+    let read_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "user" }))
+        .await
+        .unwrap();
+    let hash = extract_hash(&read_out.content).to_owned();
+
+    registry
+        .get("memory_file_edit")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "user",
+                "content_hash": hash,
+                "line_start": 1,
+                "operation": "insert_after",
+                "content": "INSERTED"
+            }),
+        )
+        .await
+        .unwrap();
+
+    let final_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "user" }))
+        .await
+        .unwrap();
+    assert!(final_out.content.contains("alpha"));
+    assert!(final_out.content.contains("INSERTED"));
+    assert!(final_out.content.contains("beta"));
+}
+
+#[tokio::test]
+async fn tool_memory_file_edit_insert_before() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+    let ctx = make_ctx(&tmp);
+
+    registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "tools",
+                "content": "alpha\nbeta",
+                "content_hash": "__new__"
+            }),
+        )
+        .await
+        .unwrap();
+
+    let read_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "tools" }))
+        .await
+        .unwrap();
+    let hash = extract_hash(&read_out.content).to_owned();
+
+    registry
+        .get("memory_file_edit")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "tools",
+                "content_hash": hash,
+                "line_start": 2,
+                "operation": "insert_before",
+                "content": "BEFORE_BETA"
+            }),
+        )
+        .await
+        .unwrap();
+
+    let final_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "tools" }))
+        .await
+        .unwrap();
+    assert!(final_out.content.contains("alpha"));
+    assert!(final_out.content.contains("BEFORE_BETA"));
+    assert!(final_out.content.contains("beta"));
+}
+
+#[tokio::test]
+async fn tool_memory_file_edit_stale_hash_rejected() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+    let ctx = make_ctx(&tmp);
+
+    // Create file
+    registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "identity",
+                "content": "original",
+                "content_hash": "__new__"
+            }),
+        )
+        .await
+        .unwrap();
+
+    // Read to capture hash
+    let read_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "identity" }))
+        .await
+        .unwrap();
+    let stale_hash = extract_hash(&read_out.content).to_owned();
+
+    // Modify file directly via loader (simulate concurrent change)
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let role = RoleId::default();
+    loader
+        .save_file(&role, MemoryFileKind::Identity, "changed externally")
+        .await
+        .unwrap();
+
+    // Edit with stale hash — must be rejected
+    let err = registry
+        .get("memory_file_edit")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "identity",
+                "content_hash": stale_hash,
+                "line_start": 1,
+                "operation": "replace",
+                "content": "attempt"
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("content hash mismatch"),
+        "expected stale error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn tool_memory_file_edit_line_out_of_range() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+    let ctx = make_ctx(&tmp);
+
+    registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "agents",
+                "content": "one\ntwo",
+                "content_hash": "__new__"
+            }),
+        )
+        .await
+        .unwrap();
+
+    let read_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "agents" }))
+        .await
+        .unwrap();
+    let hash = extract_hash(&read_out.content).to_owned();
+
+    let err = registry
+        .get("memory_file_edit")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "agents",
+                "content_hash": hash,
+                "line_start": 999,
+                "operation": "replace",
+                "content": "nope"
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("line out of range") || err.to_string().contains("out of range"),
+        "expected range error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn tool_memory_file_append_stale_hash_rejected() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+    let ctx = make_ctx(&tmp);
+
+    // Create file
+    registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "heartbeat",
+                "content": "original",
+                "content_hash": "__new__"
+            }),
+        )
+        .await
+        .unwrap();
+
+    // Capture hash
+    let read_out = registry
+        .get("memory_file_read")
+        .unwrap()
+        .execute(&ctx, serde_json::json!({ "kind": "heartbeat" }))
+        .await
+        .unwrap();
+    let stale_hash = extract_hash(&read_out.content).to_owned();
+
+    // Modify externally
+    let loader = FsMemoryFileLoader::new(tmp.path());
+    let role = RoleId::default();
+    loader
+        .save_file(&role, MemoryFileKind::Heartbeat, "changed externally")
+        .await
+        .unwrap();
+
+    // Append with stale hash — must be rejected
+    let err = registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "heartbeat",
+                "content": "new stuff",
+                "content_hash": stale_hash
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("content hash mismatch"),
+        "expected stale error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn tool_memory_file_append_new_file_with_wrong_hash_rejected() {
+    let (tmp, _mem) = setup();
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, tmp.path().to_path_buf());
+    let ctx = make_ctx(&tmp);
+
+    // File does not exist — pass wrong hash (not "__new__")
+    let err = registry
+        .get("memory_file_append")
+        .unwrap()
+        .execute(
+            &ctx,
+            serde_json::json!({
+                "kind": "bootstrap",
+                "content": "content",
+                "content_hash": "wronghash0000000"
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("content hash mismatch"),
+        "expected stale error, got: {err}"
+    );
 }

@@ -18,6 +18,7 @@ libc = { workspace = true }
 nanoid = { workspace = true }
 xclaw-core = { workspace = true }
 xclaw-tools = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -659,17 +659,34 @@ pub trait MemorySearcher: Send + Sync {
 
 #### 4.4.12 工作区记忆文件（Workspace Memory Files）
 
-工作区记忆文件是 Role 级别的 Markdown 文件，为 Agent 提供结构化的上下文注入。每个文件有明确的语义用途，**LLM 可读可写**。
+工作区记忆文件是 Role 级别的 Markdown 文件，为 Agent 提供结构化的上下文注入。每个文件有明确的语义用途，LLM 通过安全写入工具进行修改（见 [ADR-008](adr/ADR-008-memory-file-safe-write.md)）。
 
 | 文件 | 语义用途 | 加载时机 | 写入策略 |
 |------|---------|---------|---------|
-| `AGENTS.md` | 工作区协作护栏、注意事项与规范指导（代码风格、优先使用的指令等） | 构建 Prompt 时读取 | LLM 可写（更新协作规范） |
-| `SOUL.md` | AI 人设与语调（Persona & Tone），显式要求代理遵循角色属性 | 构建 Prompt 时读取 | LLM 可写（调整人设） |
-| `TOOLS.md` | 额外可用工具引导，告知 LLM 如何理解和调用非默认白名单的复合工具 | 构建 Prompt 时读取 | LLM 可写（注册新工具说明） |
-| `IDENTITY.md` | AI 自身认同框架 | 构建 Prompt 时读取 | LLM 可写（更新自我认知） |
-| `USER.md` | 当前人类使用者的技术栈偏好等参考 | 构建 Prompt 时读取 | LLM 可写（更新用户画像） |
-| `HEARTBEAT.md` | 心跳机制或长连接轮询时的应对动作参照 | 心跳 tick 或会话初始化时 | LLM 可写（调整心跳行为） |
-| `BOOTSTRAP.md` | 新工作区创建时触发的初始引导规范（仅限新工作区） | 新工作区首次会话 | LLM 可写（更新引导流程） |
+| `AGENTS.md` | 工作区协作护栏、注意事项与规范指导（代码风格、优先使用的指令等） | 构建 Prompt 时读取 | LLM 通过 append/edit 修改 |
+| `SOUL.md` | AI 人设与语调（Persona & Tone），显式要求代理遵循角色属性 | 构建 Prompt 时读取 | LLM 通过 append/edit 修改 |
+| `TOOLS.md` | 额外可用工具引导，告知 LLM 如何理解和调用非默认白名单的复合工具 | 构建 Prompt 时读取 | LLM 通过 append/edit 修改 |
+| `IDENTITY.md` | AI 自身认同框架 | 构建 Prompt 时读取 | LLM 通过 append/edit 修改 |
+| `USER.md` | 当前人类使用者的技术栈偏好等参考 | 构建 Prompt 时读取 | LLM 通过 append/edit 修改 |
+| `HEARTBEAT.md` | 心跳机制或长连接轮询时的应对动作参照 | 心跳 tick 或会话初始化时 | LLM 通过 append/edit 修改 |
+| `BOOTSTRAP.md` | 新工作区创建时触发的初始引导规范（仅限新工作区） | 新工作区首次会话 | LLM 通过 append/edit 修改 |
+
+**安全写入机制**（ADR-008）：
+
+整文件覆写（`memory_file_write`）已被移除，替换为两个安全工具：
+
+| 工具 | 操作 | 适用场景 |
+|------|------|---------|
+| `memory_file_append` | 在文件末尾追加内容 | 添加新条目 |
+| `memory_file_edit` | 基于行号定位替换/插入 | 修改已有内容 |
+
+所有写入操作通过 **content_hash** 强制先读后写：
+
+1. LLM 调用 `memory_file_read` → 获得带行号的内容 + content_hash
+2. LLM 推理决策
+3. LLM 调用 append/edit 并传入 content_hash → 工具验证 hash 后执行
+
+hash 不匹配时拒绝写入，要求重新 read。这保证 LLM 必须经历"读取 → 推理 → 写入"的完整流程。
 
 **读取策略**：每次构建 Prompt 时直接从文件系统读取，无缓存、无热加载。这保证了：
 - 用户手动编辑文件后，下次对话即刻生效
@@ -681,37 +698,52 @@ pub trait MemorySearcher: Send + Sync {
 **Loader Trait**：
 
 ```rust
-/// 工作区记忆文件加载器（xclaw-memory/src/workspace/loader.rs）
-pub trait WorkspaceMemoryLoader: Send + Sync {
-    /// 加载指定 Role 的单个工作区文件，文件不存在返回 Ok(None)
+/// 记忆文件加载器（xclaw-memory/src/workspace/loader.rs）
+pub trait MemoryFileLoader: Send + Sync {
+    /// 加载指定 Role 的单个记忆文件，文件不存在返回 Ok(None)
     async fn load_file(
         &self,
         role: &RoleId,
-        kind: WorkspaceFileKind,
-    ) -> Result<Option<String>, XClawError>;
+        kind: MemoryFileKind,
+    ) -> Result<Option<String>, MemoryError>;
 
-    /// 写入指定 Role 的工作区文件
+    /// 写入指定 Role 的记忆文件（内部使用，不暴露为 LLM 工具）
     async fn save_file(
         &self,
         role: &RoleId,
-        kind: WorkspaceFileKind,
+        kind: MemoryFileKind,
         content: &str,
-    ) -> Result<(), XClawError>;
+    ) -> Result<(), MemoryError>;
 
-    /// 加载所有工作区文件快照
+    /// 追加内容到记忆文件末尾（不存在时创建）
+    async fn append_file(
+        &self,
+        role: &RoleId,
+        kind: MemoryFileKind,
+        content: &str,
+    ) -> Result<(), MemoryError>;
+
+    /// 删除指定 Role 的记忆文件
+    async fn delete_file(
+        &self,
+        role: &RoleId,
+        kind: MemoryFileKind,
+    ) -> Result<bool, MemoryError>;
+
+    /// 加载所有记忆文件快照
     async fn load_snapshot(
         &self,
         role: &RoleId,
-    ) -> Result<WorkspaceSnapshot, XClawError>;
+    ) -> Result<MemorySnapshot, MemoryError>;
 }
 ```
 
 **类型定义**：
 
 ```rust
-/// 工作区文件类型（xclaw-memory/src/workspace/types.rs）
+/// 记忆文件类型（xclaw-memory/src/workspace/types.rs）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WorkspaceFileKind {
+pub enum MemoryFileKind {
     Agents,
     Soul,
     Tools,
@@ -719,12 +751,13 @@ pub enum WorkspaceFileKind {
     User,
     Heartbeat,
     Bootstrap,
+    LongTerm,  // MEMORY.md
 }
 
-/// 工作区文件快照
+/// 记忆文件快照
 #[derive(Debug, Clone)]
-pub struct WorkspaceSnapshot {
-    pub files: HashMap<WorkspaceFileKind, Option<String>>,
+pub struct MemorySnapshot {
+    pub files: HashMap<MemoryFileKind, Option<String>>,
 }
 ```
 
