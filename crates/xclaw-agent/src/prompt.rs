@@ -4,10 +4,8 @@
 //! files, and daily memory. Builds `ChatRequest` with history, tools, and
 //! the current user message.
 
-use std::collections::BTreeSet;
-
 use xclaw_memory::role::config::RoleConfig;
-use xclaw_memory::session::types::{ContentBlockKind, TranscriptRecord};
+use xclaw_memory::session::types::TranscriptRecord;
 use xclaw_memory::workspace::types::{MemoryFileKind, MemorySnapshot};
 use xclaw_provider::types::{ChatRequest, Message, Role, ToolDefinition};
 use xclaw_tools::traits::ToolSchema;
@@ -145,26 +143,11 @@ impl ChatRequestBuilder {
 
     /// Add conversation history from transcript records.
     ///
-    /// All content block kinds are included (no filtering). Use
-    /// `with_history_filtered` to restrict which block types are converted.
+    /// Includes Text, ToolCall, and ToolResult blocks.
+    /// Excludes Thinking, Image, Unknown, and any future block kinds.
     pub fn with_history(self, records: &[TranscriptRecord]) -> Self {
         Self {
-            history_messages: transcript_to_messages(records, &BTreeSet::new()),
-            ..self
-        }
-    }
-
-    /// Add conversation history from transcript records, keeping only
-    /// blocks whose `ContentBlockKind` is in `filter`.
-    ///
-    /// An empty `filter` is equivalent to `with_history` (no filtering).
-    pub fn with_history_filtered(
-        self,
-        records: &[TranscriptRecord],
-        filter: &BTreeSet<ContentBlockKind>,
-    ) -> Self {
-        Self {
-            history_messages: transcript_to_messages(records, filter),
+            history_messages: transcript_to_messages(records),
             ..self
         }
     }

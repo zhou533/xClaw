@@ -191,7 +191,7 @@ where
         let tool_schemas = self.tool_registry.list_schemas();
         let request = ChatRequestBuilder::new(&self.config.model)
             .with_system_prompt(&system_prompt)
-            .with_history_filtered(&history, &self.config.history_content_kinds)
+            .with_history(&history)
             .with_user_message(&input.content)
             .with_tool_schemas(&tool_schemas)
             .with_temperature(self.config.temperature)
@@ -588,13 +588,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn history_uses_configured_content_kinds() {
-        use std::collections::BTreeSet;
-        use xclaw_memory::session::types::{
-            ContentBlock, ContentBlockKind, TranscriptRecord, TranscriptRole,
-        };
+    async fn history_excludes_thinking_blocks() {
+        use xclaw_memory::session::types::{ContentBlock, TranscriptRecord, TranscriptRole};
 
-        // Seed history with a user text + assistant record containing Text + ToolCall
+        // Seed history with assistant record containing Text + Thinking + ToolCall
         let history = vec![
             TranscriptRecord {
                 id: "rec1".into(),
@@ -615,6 +612,10 @@ mod tests {
                 parent_id: Some("rec1".into()),
                 role: TranscriptRole::Assistant,
                 content: vec![
+                    ContentBlock::Thinking {
+                        text: "let me reason about this".into(),
+                        thinking_id: None,
+                    },
                     ContentBlock::Text {
                         text: "I will call a tool".into(),
                     },
@@ -639,14 +640,9 @@ mod tests {
         let daily = StubDailyMemory;
         let registry = ToolRegistry::new();
 
-        // Config: only Text in history (default)
         let config = AgentConfig::new("test-model")
             .with_max_tool_rounds(5)
             .with_transcript_tail(10);
-        assert_eq!(
-            config.history_content_kinds,
-            BTreeSet::from([ContentBlockKind::Text])
-        );
 
         let provider = CapturingProvider::new("ok");
         let captured = provider.captured.clone();
@@ -657,26 +653,23 @@ mod tests {
 
         agent.process(make_input("hello")).await.unwrap();
 
-        // The first captured request should have history messages with no tool calls
         let reqs = captured.lock().unwrap();
         assert!(!reqs.is_empty(), "provider should have been called");
         let req = &reqs[0];
 
-        // Find the assistant history message (not the current user message)
+        // Find the assistant history message
         let assistant_msgs: Vec<_> = req
             .messages
             .iter()
             .filter(|m| m.role == Role::Assistant)
             .collect();
-        // History should contain the assistant message with text only (no tool calls)
-        for msg in &assistant_msgs {
-            assert!(
-                msg.tool_calls.is_empty(),
-                "history assistant messages should have no tool_calls when filter is Text-only, \
-                 but got: {:?}",
-                msg.tool_calls
-            );
-        }
+        assert!(!assistant_msgs.is_empty(), "should have assistant history");
+
+        // Text preserved, ToolCall preserved, Thinking excluded (not in content string)
+        let msg = assistant_msgs[0];
+        assert_eq!(msg.content.as_deref(), Some("I will call a tool"));
+        assert_eq!(msg.tool_calls.len(), 1);
+        assert_eq!(msg.tool_calls[0].id, "call_old");
     }
 
     #[test]
